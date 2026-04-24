@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\MedicineController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome');
@@ -12,6 +13,13 @@ Route::view('profile', 'profile')
     ->middleware(['auth'])
     ->name('profile');
 
+Route::view('medicine/analyze', 'medicine.analyze')
+    ->middleware(['auth', 'verified'])
+    ->name('medicine.analyze');
+
+Route::get('medicine/{id}/instructions', [MedicineController::class, 'instructions'])
+    ->name('medicine.instructions');
+
 require __DIR__ . '/auth.php';
 
 /**
@@ -20,60 +28,31 @@ require __DIR__ . '/auth.php';
  * Виміри в міліграмах, або мілілітрах
  *
  *
- * - Створити форму для отримання вхідних даних
- *      - input (text) для введення назви препарату або симптомів
- *      - input (number) для введення віку пацієнт
- *      - input (checkbox) для вибору флажка вагітності
- *      - input (text) для введення алергій, або протипоказань
- *      - input (select) для вибору типу аналізу enum ['назва препарату', 'симптоми']
+ * [✅ DONE] - Створити форму для отримання вхідних даних (Livewire: App\Livewire\Medicine\AnalyzeForm)
+ *      [✅] - input (text) для введення назви препарату або симптомів
+ *      [✅] - input (number) для введення віку пацієнта
+ *      [✅] - input (checkbox) для вибору флажка вагітності
+ *      [✅] - input (text) для введення алергій, або протипоказань
+ *      [✅] - input (select) для вибору типу аналізу enum ['назва препарату', 'симптоми']
+ *      [✅] - submit -> dd() даних (тимчасово)
  *
- * - Якщо введено тип препарату (назва)
- *      - Звернутися до сервісу визначення "MedicineDetailsService" - метод (поверни симптоми препарату строкою)
- *      - Отримати інформацію про заданий препарат у форматі json {
- *          "name":"...'",
- *          "symptoms":"...",
- *          "active_ingredients": [
- *              {
- *                  "name":"...",
- *                  "quantity":"..."
- *              }
- *          ],
- *          "instructions_html":"..."
- *      }
- *      - Отримати масив рекомендованих препаратів не включаючи заданий у форматі (макс.кількість 10 шт.)
- *      [{
- *           "name":"...'",
- *           "symptoms":"...",
- *           "active_ingredients": [
- *               {
- *                   "name":"...",
- *                   "quantity":"..."
- *               }
- *           ],
- *           "instructions_html":"..."
- *       }..]
- *      - Співставлення % значення діючих речовин запропонованих препаратів та заданого в умові для визначення
- *      рекомендованих препаратів (якщо % співпадіння більше 50% - препарат вважається рекомендованим)
- *          — MedicineAnalyzeService(array[object] $recommendations, object $initialValue)
- *      - Генерація відповіді для відображення на сторінці. Із додатковими посиланнями на інструкції до засобів
+ * [✅ DONE] - Якщо введено тип препарату (назва)
+ *      [✅] - ЗАПИТ 1: MedicineDetailsService::getMedicineDetails() → деталі + симптоми препарату
+ *      [✅] - ЗАПИТ 2: MedicineDetailsService::getRecommendationsBySymptoms() → семантичний пошук по симптомах
+ *      [✅] - MedicineAnalyzeService::analyze() → порівняння діючих речовин (локально, без AI)
+ *      [✅] - Генерація результату на сторінці з посиланнями на інструкції
  *
+ * [✅ DONE] - Створення таблиці medicines (id, name unique+index, instructions_html)
+ * [✅ DONE] - Публічний маршрут /medicine/{id}/instructions → 404 якщо немає
  *
+ * [✅ DONE] - MedicineDetailsService
+ *      [✅] - getSymptoms() через GeminiService
+ *      [✅] - findOrSaveInstructions() — перевірка БД + збереження
  *
+ * [✅ DONE] - AI/GeminiService
+ *      [✅] - ask(prompt, systemInstruction) → string
+ *      [✅] - askJson(prompt, systemInstruction) → array
  *
- *  - Створення таблиці в базі даних із архівом інструкції препаратів із ключем по назві препарату
- *      - Назва medicines
- *          - Fields: id, name - index(too), instructions_html - text
- *  - Створення публічного маршруту для перегляду інструкцій препаратів по ІД із бази /medicine/{id}/instructions - id препарату із бази даних немає то 404
- *
- *  - Створити MedicineDetailsService, який буде включати функціонал
- *      - Повернути симптоми препарату із використанням запиту то штучного інтелекту. Використати AI/GeminiService()->sendRequest()
- *      - Створити функцію, що буде перевіряти по назві препарату в базі даних, чи існує такий + інструкція до нього. Якщо ні, то буде зберігати таку, якщо передана.
- *          В іншому випадку звернутися до GeminiService для генерації нової інструкції та збереження в базі даних
- *
- *  - Створити сервіс AI/GeminiService
- *      - Метод для звичайного запиту із використанням промпту ()
- *      - Метод для запиту і отримання json відповіді із використанням промпту
- *
- *  - Створити MedicineAnalyzeService
- *      - Функція, що буде отримати масив пропонованих препаратів, та заданий, та перевіряти по суміжності діючих речовин та їх кількості % того, чи підходить препарат
+ * [✅ DONE] - MedicineAnalyzeService
+ *      [✅] - analyze(recommendations[], initialMedicine) → відфільтровані за % збігом
  */
