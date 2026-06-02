@@ -9,12 +9,6 @@
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 antialiased">
 <div class="max-w-3xl mx-auto px-4 py-12">
 
-    <div class="mb-8">
-        <a href="javascript:history.back()"
-           class="inline-flex items-center gap-1.5 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-            ← Назад
-        </a>
-    </div>
 
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl ring-1 ring-gray-200 dark:ring-gray-700 p-6 sm:p-10">
         <div class="flex items-center gap-3 mb-8 pb-6 border-b border-gray-100 dark:border-gray-700">

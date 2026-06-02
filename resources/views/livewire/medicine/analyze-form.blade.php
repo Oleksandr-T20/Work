@@ -108,11 +108,104 @@
         @elseif ($state === 'result' && $result)
             @php $medicine = $result['medicine']; $recommendations = $result['recommendations']; @endphp
 
-            {{-- Кнопка назад --}}
-            <button wire:click="newSearch"
-                    class="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
-                ← Новий запит
-            </button>
+
+            {{-- ====== МАТЕМАТИЧНИЙ ЗВІТ (Alpine + Chart.js) ====== --}}
+            @if (!empty($recommendations))
+            @php
+                $chartLabels   = array_map(fn($r) => $r['name'], $recommendations);
+                $chartSmart    = array_map(fn($r) => $r['smart_score'], $recommendations);
+                $chartExact    = array_map(fn($r) => $r['match_exact'], $recommendations);
+                $chartFuzzy    = array_map(fn($r) => $r['match_fuzzy'], $recommendations);
+                $chartSymptoms = array_map(fn($r) => $r['match_symptoms'], $recommendations);
+                $chartColors   = array_map(fn($r) =>
+                    $r['smart_score'] >= 75 ? 'rgba(34,197,94,0.8)' :
+                    ($r['smart_score'] >= 50 ? 'rgba(234,179,8,0.8)' : 'rgba(239,68,68,0.8)'),
+                    $recommendations
+                );
+            @endphp
+
+            {{-- farmaReport() визначено у app.js — завжди доступна, дані передаються аргументами --}}
+            <div x-data="farmaReport(
+                    {{ Js::from($chartLabels) }},
+                    {{ Js::from($chartSmart) }},
+                    {{ Js::from($chartExact) }},
+                    {{ Js::from($chartFuzzy) }},
+                    {{ Js::from($chartSymptoms) }},
+                    {{ Js::from($chartColors) }}
+                )">
+
+                {{-- Кнопки управління — всередині Alpine-компонента для прямого доступу до toggle() --}}
+                <div class="flex items-center justify-between gap-3">
+                    <button wire:click="newSearch"
+                            class="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+                        ← Новий запит
+                    </button>
+                    <button @click="toggle()"
+                            class="flex items-center gap-2 text-sm font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-1.5 rounded-lg transition">
+                        📊 Звіт щодо аналогів
+                    </button>
+                </div>
+
+                <div x-show="show"
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 -translate-y-1"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl ring-1 ring-gray-200 dark:ring-gray-700 p-6 space-y-8">
+
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-base font-bold text-gray-800 dark:text-white">📊 Звіт щодо аналогів</h3>
+                        <span class="text-xs text-gray-400">Без урахування AI-інтерпретації</span>
+                    </div>
+
+                    {{-- Числова таблиця --}}
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-gray-100 dark:border-gray-700">
+                                    <th class="py-2 pr-4 font-semibold text-gray-500 dark:text-gray-400">Препарат</th>
+                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🧠 Збіг</th>
+                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🧪 Точні</th>
+                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🔬 Схожі</th>
+                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🩺 Симптоми</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($recommendations as $i => $rec)
+                                    <tr class="border-b border-gray-50 dark:border-gray-700/50 {{ $i === 0 ? 'font-semibold' : '' }}">
+                                        <td class="py-2 pr-4 text-gray-700 dark:text-gray-300">
+                                            @if ($i === 0)🏆 @endif {{ $rec['name'] }}
+                                        </td>
+                                        <td class="py-2 px-3 text-center font-bold
+                                            {{ $rec['smart_score'] >= 75 ? 'text-green-600' : ($rec['smart_score'] >= 50 ? 'text-yellow-600' : 'text-red-500') }}">
+                                            {{ $rec['smart_score'] }}%
+                                        </td>
+                                        <td class="py-2 px-3 text-center text-indigo-600 dark:text-indigo-400">{{ $rec['match_exact'] }}%</td>
+                                        <td class="py-2 px-3 text-center text-purple-600 dark:text-purple-400">{{ $rec['match_fuzzy'] }}%</td>
+                                        <td class="py-2 px-3 text-center text-blue-600 dark:text-blue-400">{{ $rec['match_symptoms'] }}%</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {{-- Діаграма 1 --}}
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Інтелектуальний збіг аналогів</p>
+                        <div wire:ignore>
+                            <canvas id="chart-smart" style="max-height:{{ count($recommendations) * 38 + 20 }}px"></canvas>
+                        </div>
+                    </div>
+
+                    {{-- Діаграма 2 --}}
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Метрики збігу</p>
+                        <div wire:ignore>
+                            <canvas id="chart-metrics" style="max-height:320px"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            @endif
 
             {{-- Картка препарату --}}
             <div
@@ -127,6 +220,71 @@
                     <p class="text-sm text-gray-700 dark:text-gray-300">{{ $medicine['symptoms'] }}</p>
                 </div>
 
+                {{-- Вік, вагітність, протипоказання --}}
+                <div class="flex flex-wrap gap-2">
+                    @if (!empty($medicine['min_age']))
+                        @if ($age === null)
+                            {{-- Вік не вказано — нейтральний синій бейдж --}}
+                            <span class="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium px-3 py-1 rounded-full">
+                                👶 {{ $medicine['min_age'] }}
+                            </span>
+                        @elseif ($medicine['age_allowed'])
+                            {{-- Вік вказано і підходить — зелений --}}
+                            <span class="inline-flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium px-3 py-1 rounded-full">
+                                ✅ {{ $medicine['min_age'] }}
+                            </span>
+                        @else
+                            {{-- Вік вказано але не підходить — червоний --}}
+                            <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-3 py-1 rounded-full">
+                                ⛔ {{ $medicine['min_age'] }} (вік не відповідає)
+                            </span>
+                        @endif
+                    @endif
+
+                    {{-- Вагітність — показуємо тільки якщо обрано чекбокс --}}
+                    @if ($isPregnant && isset($medicine['pregnancy_safe']))
+                        @if ($medicine['pregnancy_safe'])
+                            <span class="inline-flex items-center gap-1 bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300 text-xs font-medium px-3 py-1 rounded-full">
+                                🤰 Дозволено вагітним
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-3 py-1 rounded-full">
+                                🚫 Не рекомендовано вагітним
+                            </span>
+                        @endif
+                    @endif
+
+                    @if (!empty($medicine['contraindication_matches']))
+                        <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-3 py-1.5 rounded-full">
+                            ⚠️ Збіг з протипоказаннями: {{ implode(', ', $medicine['contraindication_matches']) }}
+                        </span>
+                    @elseif (!empty($contraindications))
+                        <span class="inline-flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium px-3 py-1 rounded-full">
+                            ✅ Збігу з Вашими протипоказаннями немає
+                        </span>
+                    @endif
+
+                    {{-- Країна виробника --}}
+                    @if (!empty($medicine['country']))
+                        <span class="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium px-3 py-1 rounded-full">
+                            🏭 {{ $medicine['country'] }}
+                        </span>
+                    @endif
+
+                    {{-- Доступність в Україні --}}
+                    @if (isset($medicine['available_in_ukraine']))
+                        @if ($medicine['available_in_ukraine'])
+                            <span class="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium px-3 py-1 rounded-full">
+                                🇺🇦 Доступний в Україні
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 text-xs font-medium px-3 py-1 rounded-full">
+                                🌍 Тільки за кордоном
+                            </span>
+                        @endif
+                    @endif
+                </div>
+
                 @if (!empty($medicine['average_price_uah']))
                     <div
                         class="inline-flex items-center gap-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-sm font-medium px-4 py-2 rounded-xl">
@@ -139,11 +297,18 @@
                         <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Діючі речовини</p>
                         <div class="flex flex-wrap gap-2">
                             @foreach ($medicine['active_ingredients'] as $ing)
-                                <span
-                                    class="inline-flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium px-3 py-1 rounded-full">
-                                {{ $ing['name'] }} <span class="opacity-60">{{ $ing['quantity'] }}</span>
-                            </span>
+                                <span class="inline-flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium px-3 py-1 rounded-full">
+                                    {{ $ing['name'] }} <span class="opacity-60">{{ $ing['quantity'] }}</span>
+                                </span>
                             @endforeach
+                        </div>
+                    @endif
+
+                    {{-- Спосіб застосування та дози --}}
+                    @if (!empty($medicine['dosage']))
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Спосіб застосування та дози</p>
+                            <p class="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{{ $medicine['dosage'] }}</p>
                         </div>
                     </div>
                 @endif
@@ -166,26 +331,149 @@
             {{-- Рекомендовані аналоги --}}
             @if (!empty($recommendations))
                 <div>
-                    <h3 class="text-base font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    <h3 class="text-base font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         🔄 Рекомендовані аналоги ({{ count($recommendations) }})
                     </h3>
+
+                    {{-- Попередження: аналоги підібрані AI на основі міжнародної медичної бази --}}
+                    <div class="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-xs rounded-xl px-4 py-3 mb-3 ring-1 ring-amber-200 dark:ring-amber-700">
+                        <span class="shrink-0 text-base">ℹ️</span>
+                        <p>
+                            Аналоги підібрані на основі <strong>міжнародної медичної бази</strong> AI і можуть відрізнятися від переліку на українських сайтах (наприклад, таблетки.ua).
+                            Деякі препарати можуть бути недоступні в аптеках України або мати іншу торгову назву.
+                            Перед застосуванням проконсультуйтеся з лікарем або фармацевтом.
+                        </p>
+                    </div>
                     <div class="space-y-3">
-                        @foreach ($recommendations as $rec)
+                        @foreach ($recommendations as $index => $rec)
                             @php $recDb = \App\Models\Medicine::where('name', $rec['name'])->first(); @endphp
-                            <div
-                                class="bg-white dark:bg-gray-800 rounded-xl ring-1 ring-gray-200 dark:ring-gray-700 p-4 sm:p-5 space-y-3">
+                            <div class="bg-white dark:bg-gray-800 rounded-xl ring-1 ring-gray-200 dark:ring-gray-700 p-4 sm:p-5 space-y-3
+                                {{ $index === 0 ? 'ring-2 ring-indigo-400 dark:ring-indigo-500' : '' }}">
+
+                                {{-- Шапка: назва + smart_score --}}
                                 <div class="flex items-center justify-between gap-3 flex-wrap">
-                                    <span
-                                        class="font-semibold text-gray-900 dark:text-white text-sm">{{ $rec['name'] }}</span>
-                                    <span class="text-xs font-bold px-2.5 py-1 rounded-full
-                                        {{ $rec['match_percent'] >= 80 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                                          ($rec['match_percent'] >= 60 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                                           'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300') }}">
-                                        {{ $rec['match_percent'] }}% збіг
-                                    </span>
+                                    <div class="flex items-center gap-2">
+                                        @if ($index === 0)
+                                            <span title="Найкращий варіант для Вас" class="text-base">🏆</span>
+                                        @endif
+                                        <span class="font-semibold text-gray-900 dark:text-white text-sm">{{ $rec['name'] }}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        {{-- Інтелектуальний бал (з урахуванням усіх обмежень) --}}
+                                        <span class="text-xs font-bold px-2.5 py-1 rounded-full
+                                            {{ $rec['smart_score'] >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                                              ($rec['smart_score'] >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                                               'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300') }}">
+                                            🧠 {{ $rec['smart_score'] }}%
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {{-- Пояснення інтелектуального аналізу --}}
+                                @if (!empty($rec['smart_reasons']))
+                                    <div class="bg-gray-50 dark:bg-gray-700/40 rounded-lg px-3 py-2 space-y-1">
+                                        @foreach ($rec['smart_reasons'] as $reason)
+                                            <p class="text-xs flex items-start gap-1.5
+                                                {{ $reason['type'] === 'positive' ? 'text-green-700 dark:text-green-400' :
+                                                  ($reason['type'] === 'warning'  ? 'text-red-600 dark:text-red-400' :
+                                                   'text-gray-500 dark:text-gray-400') }}">
+                                                <span class="shrink-0 mt-px">
+                                                    {{ $reason['type'] === 'positive' ? '✅' : ($reason['type'] === 'warning' ? '⚠️' : 'ℹ️') }}
+                                                </span>
+                                                {{ $reason['text'] }}
+                                            </p>
+                                        @endforeach
+                                    </div>
+                                @endif
+
+                                {{-- Три деталізовані показники схожості --}}
+                                <div class="grid grid-cols-3 gap-2 text-center">
+                                    {{-- 1. Точний збіг діючих речовин + дозування ±20% --}}
+                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
+                                        <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🧪 Точні речовини</p>
+                                        <p class="text-xs font-bold
+                                            {{ $rec['match_exact'] >= 80 ? 'text-green-600 dark:text-green-400' :
+                                              ($rec['match_exact'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                               'text-red-500 dark:text-red-400') }}">
+                                            {{ $rec['match_exact'] }}%
+                                        </p>
+                                    </div>
+
+                                    {{-- 2. Нечіткий збіг — "ibuprofen" ↔ "ibuprofenum" --}}
+                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
+                                        <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🔬 Схожі речовини</p>
+                                        <p class="text-xs font-bold
+                                            {{ $rec['match_fuzzy'] >= 80 ? 'text-green-600 dark:text-green-400' :
+                                              ($rec['match_fuzzy'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                               'text-red-500 dark:text-red-400') }}">
+                                            {{ $rec['match_fuzzy'] }}%
+                                        </p>
+                                    </div>
+
+                                    {{-- 3. Збіг симптомів/показань (Jaccard) --}}
+                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
+                                        <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🩺 Симптоми</p>
+                                        <p class="text-xs font-bold
+                                            {{ $rec['match_symptoms'] >= 80 ? 'text-green-600 dark:text-green-400' :
+                                              ($rec['match_symptoms'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                               'text-red-500 dark:text-red-400') }}">
+                                            {{ $rec['match_symptoms'] }}%
+                                        </p>
+                                    </div>
                                 </div>
 
                                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ $rec['symptoms'] }}</p>
+
+                                {{-- Вік, вагітність, протипоказання аналогу --}}
+                                <div class="flex flex-wrap gap-1.5">
+                                    @if (!empty($rec['min_age']))
+                                        @if ($age === null)
+                                            <span class="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                👶 {{ $rec['min_age'] }}
+                                            </span>
+                                        @elseif ($rec['age_allowed'])
+                                            <span class="inline-flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                ✅ {{ $rec['min_age'] }}
+                                            </span>
+                                        @else
+                                            <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                ⛔ {{ $rec['min_age'] }} (вік не відповідає)
+                                            </span>
+                                        @endif
+                                    @endif
+
+                                    @if ($isPregnant && isset($rec['pregnancy_safe']))
+                                        @if ($rec['pregnancy_safe'])
+                                            <span class="inline-flex items-center gap-1 bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                🤰 Дозволено вагітним
+                                            </span>
+                                        @else
+                                            <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                🚫 Не рекомендовано вагітним
+                                            </span>
+                                        @endif
+                                    @endif
+
+                                    {{-- Країна виробника --}}
+                                    @if (!empty($rec['country']))
+                                        <span class="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                            🏭 {{ $rec['country'] }}
+                                        </span>
+                                    @endif
+
+                                    {{-- Доступність в Україні --}}
+                                    @if (isset($rec['available_in_ukraine']))
+                                        @if ($rec['available_in_ukraine'])
+                                            <span class="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                🇺🇦 Доступний в Україні
+                                            </span>
+                                        @else
+                                            <span class="inline-flex items-center gap-1 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                🌍 Тільки за кордоном
+                                            </span>
+                                        @endif
+                                    @endif
+                                </div>
 
                                 @if (!empty($rec['average_price_uah']))
                                     <p class="text-xs font-medium text-green-600 dark:text-green-400">
@@ -196,14 +484,21 @@
                                 @if (!empty($rec['active_ingredients']))
                                     <div class="flex flex-wrap gap-1.5">
                                         @foreach ($rec['active_ingredients'] as $ing)
-                                            <span
-                                                class="inline-flex items-center gap-1 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2.5 py-0.5 rounded-full">
-                                                {{ $ing['name'] }} <span
-                                                    class="opacity-50">{{ $ing['quantity'] }}</span>
+                                            <span class="inline-flex items-center gap-1 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2.5 py-0.5 rounded-full">
+                                                {{ $ing['name'] }} <span class="opacity-50">{{ $ing['quantity'] }}</span>
                                             </span>
                                         @endforeach
                                     </div>
                                 @endif
+
+                                {{-- Спосіб застосування та дози --}}
+                                @if (!empty($rec['dosage']))
+                                    <div class="bg-gray-50 dark:bg-gray-700/40 rounded-lg px-3 py-2">
+                                        <p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Спосіб застосування та дози</p>
+                                        <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{{ $rec['dosage'] }}</p>
+                                    </div>
+                                @endif
+
 
                                 @if ($recDb)
                                     <a href="{{ route('medicine.instructions', $recDb->id) }}" target="_blank"
