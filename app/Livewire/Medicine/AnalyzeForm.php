@@ -43,34 +43,56 @@ class AnalyzeForm extends Component
         $this->errorMessage = null;
 
         try {
-            $details = app(MedicineDetailsService::class);
+            $details  = app(MedicineDetailsService::class);
             $analyzer = app(MedicineAnalyzeService::class);
 
             if ($this->analysisType === 'medicine_name') {
                 // ЗАПИТ 1 — Деталі препарату (назва, симптоми, діючі речовини)
                 $medicine = $details->getMedicineDetails($this->query);
 
-                // ЗАПИТ 2 — Пошук препаратів за симптомами (семантичний)
+                // ЗАПИТ 2 — Пошук аналогів за симптомами
                 $recommendations = $details->getRecommendationsBySymptoms(
                     $medicine['symptoms'],
                     $medicine['name']
                 );
 
-                // Зберігаємо інструкції в БД з отриманих даних AI
-                $details->findOrSaveInstructions($medicine['name'], $medicine['instructions_html'] ?? '');
+                // Зберігаємо повні дані в БД (для майбутнього локального пошуку)
+                $details->saveMedicine($medicine);
                 foreach ($recommendations as $rec) {
-                    $details->findOrSaveInstructions($rec['name'], $rec['instructions_html'] ?? '');
+                    $details->saveMedicine($rec);
                 }
 
-                // Порівняння діючих речовин локально (без AI)
-                $filtered = $analyzer->analyze($recommendations, $medicine);
+                // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
+                $patientContext = [
+                    'age'              => $this->age,
+                    'is_pregnant'      => $this->isPregnant,
+                    'contraindications' => $this->contraindications,
+                ];
+
+                // Шукаємо додаткові аналоги в локальній БД за діючими речовинами
+                // (вирішує проблему асиметрії: Піколакс ↔ Слабілакс і навпаки)
+                $aiFoundNames = array_column($recommendations, 'name');
+                $localAnalogues = $details->findLocalAnalogues(
+                    $medicine['active_ingredients'] ?? [],
+                    $medicine['name'],
+                    $aiFoundNames
+                );
+
+                // Об'єднуємо AI-аналоги і локальні (локальні додаються в кінець перед аналізом)
+                $allRecommendations = array_merge($recommendations, $localAnalogues);
+
+                // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext);
+
+                // Для основного препарату — перевіряємо обмеження через той самий сервіс
+                $medicine['age_allowed']             = $analyzer->checkAgeAllowed($medicine['min_age'] ?? '', $this->age);
+                $medicine['contraindication_matches'] = $analyzer->checkContraindications($medicine['contraindications'] ?? [], $this->contraindications);
 
                 $this->result = [
-                    'medicine' => $medicine,
+                    'medicine'        => $medicine,
                     'recommendations' => $filtered,
                 ];
             } else {
-                // Симптоми — поки заглушка (наступний крок)
                 throw new \RuntimeException('Аналіз по симптомах ще в розробці.');
             }
 
