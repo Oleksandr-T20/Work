@@ -26,19 +26,21 @@ class AnalyzeForm extends Component
     public string $analysisType = 'medicine_name';
 
     // --- Стан ---
-    public string $state = 'idle'; // idle | loading | result | error
+    public string $state = 'idle'; // idle | loading | result | error | validation_error
 
     public ?array $result = null;
     public ?string $errorMessage = null;
+    public ?string $validationWarning = null;
 
     protected function rules(): array
     {
         return [
             'query'             => ['required', 'string', 'max:500',
                 function ($attribute, $value, $fail) {
-                    if ($this->analysisType === 'medicine_name' && !preg_match('/^[\p{L}\p{N}\s.,\-\/]+$/u', $value)) {
+                    // Дозволяємо літери, цифри, пробіли, апострофи та розділові знаки
+                    if ($this->analysisType === 'medicine_name' && !preg_match('/^[\p{L}\p{N}\s.\',\-\/]+$/u', $value)) {
                         $fail('Назва препарату містить неприпустимі символи.');
-                    } elseif ($this->analysisType === 'symptoms' && !preg_match('/^[\p{L}\p{N}\s.,\-\/]+$/u', $value)) {
+                    } elseif ($this->analysisType === 'symptoms' && !preg_match('/^[\p{L}\p{N}\s.\',\-\/]+$/u', $value)) {
                         $fail('Симптоми містять неприпустимі символи.');
                     }
                 },
@@ -59,8 +61,28 @@ class AnalyzeForm extends Component
         $this->state = 'loading';
         $this->result = null;
         $this->errorMessage = null;
+        $this->validationWarning = null;
 
         try {
+            // Валідація типу введених даних
+            $gemini = app(\App\Services\AI\GeminiService::class);
+            
+            if ($this->analysisType === 'medicine_name') {
+                // Перевіряємо, що введено назву препарату, а не симптоми
+                if (!$gemini->isMedicineName($this->query)) {
+                    $this->validationWarning = 'Ви вказали симптоми або опис замість назви препарату. Якщо хочете знайти препарат за симптомами, оберіть відповідний тип аналізу у випадаючому списку.';
+                    $this->state = 'validation_error';
+                    return;
+                }
+            } elseif ($this->analysisType === 'symptoms') {
+                // Перевіряємо, що введено симптоми, а не назву препарату
+                if ($gemini->isMedicineName($this->query)) {
+                    $this->validationWarning = 'Ви вказали назву препарату замість опису симптомів. Якщо хочете знайти препарат за назвою, оберіть відповідний тип аналізу у випадаючому списку.';
+                    $this->state = 'validation_error_medicine';
+                    return;
+                }
+            }
+
             $details  = app(MedicineDetailsService::class);
             $analyzer = app(MedicineAnalyzeService::class);
 
@@ -173,6 +195,27 @@ class AnalyzeForm extends Component
         $this->state = 'idle';
         $this->result = null;
         $this->errorMessage = null;
+        $this->validationWarning = null;
+    }
+
+    /**
+     * Перемикає на пошук за симптомами і запускає аналіз.
+     */
+    public function searchBySymptoms(): void
+    {
+        $this->analysisType = 'symptoms';
+        $this->validationWarning = null;
+        $this->submit();
+    }
+
+    /**
+     * Перемикає на пошук за назвою препарату і запускає аналіз.
+     */
+    public function searchByMedicineName(): void
+    {
+        $this->analysisType = 'medicine_name';
+        $this->validationWarning = null;
+        $this->submit();
     }
 
     public function render()

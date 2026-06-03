@@ -104,6 +104,64 @@
                 </button>
             </div>
 
+            {{-- ====== ПОПЕРЕДЖЕННЯ ВАЛІДАЦІЇ (validation_error) ====== --}}
+        @elseif ($state === 'validation_error')
+            <div class="bg-amber-50 dark:bg-amber-900/20 rounded-2xl ring-1 ring-amber-200 dark:ring-amber-800 p-6 sm:p-8">
+                <div class="flex items-start gap-4">
+                    <div
+                        class="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-800">
+                        <svg class="w-5 h-5 text-amber-600 dark:text-amber-300" fill="none" stroke="currentColor"
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-amber-800 dark:text-amber-200">Невірно вказана назва препарату</h3>
+                        <p class="mt-1 text-sm text-amber-700 dark:text-amber-300">{{ $validationWarning }}</p>
+                    </div>
+                </div>
+                <div class="mt-5 flex flex-col sm:flex-row gap-3">
+                    <button wire:click="newSearch"
+                            class="flex-1 flex items-center justify-center gap-2 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/30 font-medium py-2.5 rounded-xl transition">
+                        ← Змінити запит
+                    </button>
+                    <button wire:click="searchBySymptoms"
+                            class="flex-1 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-medium py-2.5 rounded-xl transition">
+                        🤒 Шукати за симптомами
+                    </button>
+                </div>
+            </div>
+
+            {{-- ====== ПОПЕРЕДЖЕННЯ: ВВЕДЕНО НАЗВУ ПРЕПАРАТУ (validation_error_medicine) ====== --}}
+        @elseif ($state === 'validation_error_medicine')
+            <div class="bg-blue-50 dark:bg-blue-900/20 rounded-2xl ring-1 ring-blue-200 dark:ring-blue-800 p-6 sm:p-8">
+                <div class="flex items-start gap-4">
+                    <div
+                        class="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-800">
+                        <svg class="w-5 h-5 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor"
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-blue-800 dark:text-blue-200">Введено назву препарату</h3>
+                        <p class="mt-1 text-sm text-blue-700 dark:text-blue-300">{{ $validationWarning }}</p>
+                    </div>
+                </div>
+                <div class="mt-5 flex flex-col sm:flex-row gap-3">
+                    <button wire:click="newSearch"
+                            class="flex-1 flex items-center justify-center gap-2 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800/30 font-medium py-2.5 rounded-xl transition">
+                        ← Змінити запит
+                    </button>
+                    <button wire:click="searchByMedicineName"
+                            class="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl transition">
+                        💊 Шукати за назвою
+                    </button>
+                </div>
+            </div>
+
             {{-- ====== РЕЗУЛЬТАТ (result) ====== --}}
         @elseif ($state === 'result' && $result)
             @php $medicine = $result['medicine']; $recommendations = $result['recommendations']; @endphp
@@ -268,7 +326,7 @@
                         <span class="inline-flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs font-medium px-3 py-1.5 rounded-full">
                             ⚠️ Збіг з протипоказаннями: {{ implode(', ', $medicine['contraindication_matches']) }}
                         </span>
-                    @elseif (!empty($contraindications))
+                    @elseif (!empty($contraindications) && $analysisType === 'medicine_name')
                         <span class="inline-flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium px-3 py-1 rounded-full">
                             ✅ Збігу з Вашими протипоказаннями немає
                         </span>

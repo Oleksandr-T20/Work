@@ -54,19 +54,6 @@ class MedicineAnalyzeService
         $initialIngredients = $this->normalizeIngredients($initialMedicine['active_ingredients'] ?? []);
         $initialSymptoms    = $this->normalizeSymptoms($initialMedicine['symptoms'] ?? '');
 
-        if (empty($initialIngredients)) {
-            return array_map(fn($r) => array_merge($r, [
-                'match_exact'             => 100.0,
-                'match_fuzzy'             => 100.0,
-                'match_symptoms'          => 100.0,
-                'match_percent'           => 100.0,
-                'age_allowed'             => true,
-                'contraindication_matches' => [],
-                'smart_score'             => 100.0,
-                'smart_reasons'           => [],
-            ]), $recommendations);
-        }
-
         $result = [];
 
         foreach ($recommendations as $recommendation) {
@@ -76,10 +63,20 @@ class MedicineAnalyzeService
             // --- Три метрики хімічно-симптоматичної схожості ---
 
             // 1. Точний збіг: назва речовини ідентична + дозування ±20%
-            $matchExact = $this->calculateExactMatchPercent($initialIngredients, $candidateIngredients);
+            // Якщо немає вихідних речовин — немає що порівнювати
+            if (empty($initialIngredients)) {
+                $matchExact = 0.0;
+            } else {
+                $matchExact = $this->calculateExactMatchPercent($initialIngredients, $candidateIngredients);
+            }
 
             // 2. Нечіткий збіг: одна назва містить іншу ("ibuprofen" ↔ "ibuprofenum") + дозування ±20%
-            $matchFuzzy = $this->calculateFuzzyMatchPercent($initialIngredients, $candidateIngredients);
+            // Якщо немає вихідних речовин — немає що порівнювати
+            if (empty($initialIngredients)) {
+                $matchFuzzy = 0.0;
+            } else {
+                $matchFuzzy = $this->calculateFuzzyMatchPercent($initialIngredients, $candidateIngredients);
+            }
 
             // 3. Збіг симптомів/показань (Jaccard за ключовими словами)
             $matchSymptoms = $this->calculateSymptomMatchPercent($initialSymptoms, $candidateSymptoms);
@@ -427,11 +424,18 @@ class MedicineAnalyzeService
     // =========================================================================
 
     /**
-     * Jaccard-схожість між наборами ключових слів симптомів:
-     *   |перетин| / |об'єднання| × 100
+     * Розраховує відсоток збігу симптомів пацієнта з показаннями препарату.
      *
-     * @param string[] $initial
-     * @param string[] $candidate
+     * Алгоритм:
+     *   1. Визначаємо, скільки симптомів пацієнта покриває препарат (покриття)
+     *   2. Штрафуємо, якщо препарат має занадто багато зайвих показань (нецільовий)
+     *   3. Результат = покриття × коефіцієнт цільовості
+     *
+     * Це дає більш точну оцінку: препарат, який лікує "все підряд", отримає нижчий бал,
+     * ніж препарат, який цільовий саме на симптоми пацієнта.
+     *
+     * @param string[] $initial   Симптоми пацієнта
+     * @param string[] $candidate Показання препарату
      */
     private function calculateSymptomMatchPercent(array $initial, array $candidate): float
     {
@@ -439,10 +443,20 @@ class MedicineAnalyzeService
             return 0.0;
         }
 
+        // 1. Покриття: скільки слів пацієнта є в показаннях препарату
         $intersection = array_intersect($initial, $candidate);
-        $union        = array_unique(array_merge($initial, $candidate));
+        $coverage = count($intersection) / count($initial); // 0.0 – 1.0
 
-        return (count($intersection) / count($union)) * 100;
+        // 2. Коефіцієнт цільовості: наскільки препарат сфокусований на симптомах пацієнта
+        // Якщо у препарата 100 показань, а пацієнт має 2 — це нецільовий препарат
+        // Формула: |перетин| / |показання препарату| (але не більше 1.0)
+        $focus = min(1.0, count($intersection) / max(1, count($candidate)));
+
+        // 3. Фінальний бал: покриття × вага_покриття + цільовість × вага_цільовості
+        // Пріоритет на покритті (пацієнт хоче знайти ліки для своїх симптомів)
+        $score = ($coverage * 0.7) + ($focus * 0.3);
+
+        return $score * 100;
     }
 
     // =========================================================================
