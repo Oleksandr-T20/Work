@@ -11,7 +11,6 @@ use Throwable;
 class AnalyzeForm extends Component
 {
     // --- Форма ---
-    #[Validate('required|string|max:500')]
     public string $query = '';
 
     #[Validate('required|integer|min:0|max:120')]
@@ -31,6 +30,25 @@ class AnalyzeForm extends Component
 
     public ?array $result = null;
     public ?string $errorMessage = null;
+
+    protected function rules(): array
+    {
+        return [
+            'query'             => ['required', 'string', 'max:500',
+                function ($attribute, $value, $fail) {
+                    if ($this->analysisType === 'medicine_name' && !preg_match('/^[\p{L}\p{N}\s.,\-\/]+$/u', $value)) {
+                        $fail('Назва препарату містить неприпустимі символи.');
+                    } elseif ($this->analysisType === 'symptoms' && !preg_match('/^[\p{L}\p{N}\s.,\-\/]+$/u', $value)) {
+                        $fail('Симптоми містять неприпустимі символи.');
+                    }
+                },
+            ],
+            'age'               => 'required|integer|min:0|max:120',
+            'isPregnant'        => 'boolean',
+            'contraindications' => 'nullable|string|max:500',
+            'analysisType'      => 'required|in:medicine_name,symptoms',
+        ];
+    }
 
     public function submit(): void
     {
@@ -92,8 +110,55 @@ class AnalyzeForm extends Component
                     'medicine'        => $medicine,
                     'recommendations' => $filtered,
                 ];
+            } elseif ($this->analysisType === 'symptoms') {
+                // ЗАПИТ 1 — Пошук аналогів за симптомами
+                $recommendations = $details->getRecommendationsBySymptoms(
+                    $this->query,
+                    '' // Немає основного препарату для виключення
+                );
+
+                // Створюємо фіктивний препарат для аналізу
+                $medicine = [
+                    'name'               => $this->query,
+                    'symptoms'           => $this->query,
+                    'active_ingredients' => [],
+                    'min_age'            => '',
+                    'contraindications'  => [],
+                ];
+
+                // Зберігаємо повні дані в БД (для майбутнього локального пошуку)
+                foreach ($recommendations as $rec) {
+                    $details->saveMedicine($rec);
+                }
+
+                // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
+                $patientContext = [
+                    'age'              => $this->age,
+                    'is_pregnant'      => $this->isPregnant,
+                    'contraindications' => $this->contraindications,
+                ];
+
+                // Шукаємо додаткові аналоги в локальній БД за діючими речовинами
+                // (вирішує проблему асиметрії: Піколакс ↔ Слабілакс і навпаки)
+                $aiFoundNames = array_column($recommendations, 'name');
+                $localAnalogues = $details->findLocalAnalogues(
+                    [], // Немає діючих речовин для пошуку локальних аналогів
+                    '', // Немає основного препарату для виключення
+                    $aiFoundNames
+                );
+
+                // Об'єднуємо AI-аналоги і локальні (локальні додаються в кінець перед аналізом)
+                $allRecommendations = array_merge($recommendations, $localAnalogues);
+
+                // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext);
+
+                $this->result = [
+                    'medicine'        => $medicine,
+                    'recommendations' => $filtered,
+                ];
             } else {
-                throw new \RuntimeException('Аналіз по симптомах ще в розробці.');
+                throw new \RuntimeException('Невідомий тип аналізу.');
             }
 
             $this->state = 'result';

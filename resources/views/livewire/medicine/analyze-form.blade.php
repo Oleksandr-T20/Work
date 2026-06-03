@@ -142,7 +142,7 @@
                     </button>
                     <button @click="toggle()"
                             class="flex items-center gap-2 text-sm font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-1.5 rounded-lg transition">
-                        📊 Звіт щодо аналогів
+                        📊 {{ $analysisType === 'medicine_name' ? 'Звіт щодо аналогів' : 'Звіт щодо рекомендованих препаратів' }}
                     </button>
                 </div>
 
@@ -153,7 +153,7 @@
                      class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl ring-1 ring-gray-200 dark:ring-gray-700 p-6 space-y-8">
 
                     <div class="flex items-center justify-between">
-                        <h3 class="text-base font-bold text-gray-800 dark:text-white">📊 Звіт щодо аналогів</h3>
+                        <h3 class="text-base font-bold text-gray-800 dark:text-white">📊 {{ $analysisType === 'medicine_name' ? 'Звіт щодо аналогів' : 'Звіт щодо рекомендованих препаратів' }}</h3>
                         <span class="text-xs text-gray-400">Без урахування AI-інтерпретації</span>
                     </div>
 
@@ -164,8 +164,10 @@
                                 <tr class="border-b border-gray-100 dark:border-gray-700">
                                     <th class="py-2 pr-4 font-semibold text-gray-500 dark:text-gray-400">Препарат</th>
                                     <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🧠 Збіг</th>
-                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🧪 Точні</th>
-                                    <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🔬 Схожі</th>
+                                    @if ($analysisType === 'medicine_name')
+                                        <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🧪 Точні</th>
+                                        <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🔬 Схожі</th>
+                                    @endif
                                     <th class="py-2 px-3 font-semibold text-gray-500 dark:text-gray-400 text-center">🩺 Симптоми</th>
                                 </tr>
                             </thead>
@@ -179,8 +181,10 @@
                                             {{ $rec['smart_score'] >= 75 ? 'text-green-600' : ($rec['smart_score'] >= 50 ? 'text-yellow-600' : 'text-red-500') }}">
                                             {{ $rec['smart_score'] }}%
                                         </td>
-                                        <td class="py-2 px-3 text-center text-indigo-600 dark:text-indigo-400">{{ $rec['match_exact'] }}%</td>
-                                        <td class="py-2 px-3 text-center text-purple-600 dark:text-purple-400">{{ $rec['match_fuzzy'] }}%</td>
+                                        @if ($analysisType === 'medicine_name')
+                                            <td class="py-2 px-3 text-center text-indigo-600 dark:text-indigo-400">{{ $rec['match_exact'] }}%</td>
+                                            <td class="py-2 px-3 text-center text-purple-600 dark:text-purple-400">{{ $rec['match_fuzzy'] }}%</td>
+                                        @endif
                                         <td class="py-2 px-3 text-center text-blue-600 dark:text-blue-400">{{ $rec['match_symptoms'] }}%</td>
                                     </tr>
                                 @endforeach
@@ -197,12 +201,14 @@
                     </div>
 
                     {{-- Діаграма 2 --}}
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Метрики збігу</p>
-                        <div wire:ignore>
-                            <canvas id="chart-metrics" style="max-height:320px"></canvas>
+                    @if ($analysisType === 'medicine_name')
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Метрики збігу</p>
+                            <div wire:ignore>
+                                <canvas id="chart-metrics" style="max-height:320px"></canvas>
+                            </div>
                         </div>
-                    </div>
+                    @endif
                 </div>
             </div>
             @endif
@@ -211,12 +217,16 @@
             <div
                 class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl ring-1 ring-gray-200 dark:ring-gray-700 p-6 sm:p-8 space-y-5">
                 <div class="flex items-center gap-3">
-                    <span class="text-3xl">💊</span>
+                    <span class="text-3xl">
+            {{ $analysisType === 'medicine_name' ? '💊' : '🤒' }}
+        </span>
                     <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ $medicine['name'] }}</h2>
                 </div>
 
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Показання</p>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                        {{ $analysisType === 'medicine_name' ? 'Показання' : 'Симптоми' }}
+                    </p>
                     <p class="text-sm text-gray-700 dark:text-gray-300">{{ $medicine['symptoms'] }}</p>
                 </div>
 
@@ -332,14 +342,14 @@
             @if (!empty($recommendations))
                 <div>
                     <h3 class="text-base font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                        🔄 Рекомендовані аналоги ({{ count($recommendations) }})
+                        🔄 {{ $analysisType === 'medicine_name' ? 'Рекомендовані аналоги' : 'Рекомендовані препарати' }} ({{ count($recommendations) }})
                     </h3>
 
                     {{-- Попередження: аналоги підібрані AI на основі міжнародної медичної бази --}}
                     <div class="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-xs rounded-xl px-4 py-3 mb-3 ring-1 ring-amber-200 dark:ring-amber-700">
                         <span class="shrink-0 text-base">ℹ️</span>
                         <p>
-                            Аналоги підібрані на основі <strong>міжнародної медичної бази</strong> AI і можуть відрізнятися від переліку на українських сайтах (наприклад, таблетки.ua).
+                            Препарати підібрані на основі <strong>міжнародної медичної бази</strong> AI і можуть відрізнятися від переліку на українських сайтах (наприклад, таблетки.ua).
                             Деякі препарати можуть бути недоступні в аптеках України або мати іншу торгову назву.
                             Перед застосуванням проконсультуйтеся з лікарем або фармацевтом.
                         </p>
@@ -387,28 +397,30 @@
                                 @endif
 
                                 {{-- Три деталізовані показники схожості --}}
-                                <div class="grid grid-cols-3 gap-2 text-center">
-                                    {{-- 1. Точний збіг діючих речовин + дозування ±20% --}}
-                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
-                                        <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🧪 Точні речовини</p>
-                                        <p class="text-xs font-bold
-                                            {{ $rec['match_exact'] >= 80 ? 'text-green-600 dark:text-green-400' :
-                                              ($rec['match_exact'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
-                                               'text-red-500 dark:text-red-400') }}">
-                                            {{ $rec['match_exact'] }}%
-                                        </p>
-                                    </div>
+                                <div class="grid grid-cols-{{ $analysisType === 'medicine_name' ? '3' : '1' }} gap-2 text-center">
+                                    @if ($analysisType === 'medicine_name')
+                                        {{-- 1. Точний збіг діючих речовин + дозування ±20% --}}
+                                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
+                                            <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🧪 Точні речовини</p>
+                                            <p class="text-xs font-bold
+                                                {{ $rec['match_exact'] >= 80 ? 'text-green-600 dark:text-green-400' :
+                                                  ($rec['match_exact'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                                   'text-red-500 dark:text-red-400') }}">
+                                                {{ $rec['match_exact'] }}%
+                                            </p>
+                                        </div>
 
-                                    {{-- 2. Нечіткий збіг — "ibuprofen" ↔ "ibuprofenum" --}}
-                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
-                                        <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🔬 Схожі речовини</p>
-                                        <p class="text-xs font-bold
-                                            {{ $rec['match_fuzzy'] >= 80 ? 'text-green-600 dark:text-green-400' :
-                                              ($rec['match_fuzzy'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
-                                               'text-red-500 dark:text-red-400') }}">
-                                            {{ $rec['match_fuzzy'] }}%
-                                        </p>
-                                    </div>
+                                        {{-- 2. Нечіткий збіг — "ibuprofen" ↔ "ibuprofenum" --}}
+                                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
+                                            <p class="text-[10px] text-gray-400 dark:text-gray-500 leading-tight mb-0.5">🔬 Схожі речовини</p>
+                                            <p class="text-xs font-bold
+                                                {{ $rec['match_fuzzy'] >= 80 ? 'text-green-600 dark:text-green-400' :
+                                                  ($rec['match_fuzzy'] >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                                   'text-red-500 dark:text-red-400') }}">
+                                                {{ $rec['match_fuzzy'] }}%
+                                            </p>
+                                        </div>
+                                    @endif
 
                                     {{-- 3. Збіг симптомів/показань (Jaccard) --}}
                                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-2 py-1.5">
