@@ -15,7 +15,17 @@ class MedicineAnalyzeService
     private const MIN_SYMPTOM_WORD_LENGTH = 4;
 
     // -------------------------------------------------------------------------
-    // Штрафи для інтелектуального скорингу (smart_score)
+    // Ваги для формули SmartScore (Weighted Scoring Model)
+    // -------------------------------------------------------------------------
+
+    /** Вага хімічного збігу (жорсткий критерій) — пріоритет */
+    private const WEIGHT_CHEMICAL = 0.7;
+
+    /** Вага симптоматичного збігу (м'який критерій) */
+    private const WEIGHT_SYMPTOMS = 0.3;
+
+    // -------------------------------------------------------------------------
+    // Штрафи для коригування SmartScore (обмеження пацієнта)
     // -------------------------------------------------------------------------
 
     /** Вік пацієнта не відповідає мінімальному — сильний штраф */
@@ -49,7 +59,7 @@ class MedicineAnalyzeService
      * @param  array{age: ?int, is_pregnant: bool, contraindications: string} $patientContext
      * @return array<int, array<string, mixed>>
      */
-    public function analyze(array $recommendations, array $initialMedicine, array $patientContext = []): array
+    public function analyze(array $recommendations, array $initialMedicine, array $patientContext = [], string $analysisType = 'medicine_name'): array
     {
         $initialIngredients = $this->normalizeIngredients($initialMedicine['active_ingredients'] ?? []);
         $initialSymptoms    = $this->normalizeSymptoms($initialMedicine['symptoms'] ?? '');
@@ -57,8 +67,20 @@ class MedicineAnalyzeService
         $result = [];
 
         foreach ($recommendations as $recommendation) {
+            // Крос-мовна фільтрація брендів
+            $searchedBrand = $this->normalizeBrandName($initialMedicine['name'] ?? '');
+            $recommendedBrand = $this->normalizeBrandName($recommendation['name'] ?? '');
+
+            // 2. Якщо це той самий бренд — миттєво пропускаємо його
+            if ($searchedBrand === $recommendedBrand) {
+            continue;
+            }
+            
             $candidateIngredients = $this->normalizeIngredients($recommendation['active_ingredients'] ?? []);
             $candidateSymptoms    = $this->normalizeSymptoms($recommendation['symptoms'] ?? '');
+
+            // Визначаємо, чи є асиметрія в дозах для точних речовин
+            $dosageMismatch = $this->hasDosageMismatch($initialIngredients, $candidateIngredients);
 
             // --- Три метрики хімічно-симптоматичної схожості ---
 
@@ -81,8 +103,11 @@ class MedicineAnalyzeService
             // 3. Збіг симптомів/показань (Jaccard за ключовими словами)
             $matchSymptoms = $this->calculateSymptomMatchPercent($initialSymptoms, $candidateSymptoms);
 
-            // Базовий відсоток схожості — максимум з трьох
-            $matchPercent = max($matchExact, $matchFuzzy, $matchSymptoms);
+            // --- Базовий бал за Weighted Scoring Model ---
+            // Формула: SmartScore = 0.7 × max(exact, fuzzy) + 0.3 × symptoms
+            // (Штрафи за обмеження пацієнта застосовуються пізніше)
+            $chemicalMatch = max($matchExact, $matchFuzzy);
+            $matchPercent = (self::WEIGHT_CHEMICAL * $chemicalMatch) + (self::WEIGHT_SYMPTOMS * $matchSymptoms);
 
             // --- Обмеження на основі контексту пацієнта ---
 
@@ -105,6 +130,8 @@ class MedicineAnalyzeService
                 pregnancySafe:            $recommendation['pregnancy_safe'] ?? null,
                 contraindicationMatches:  $contraindicationMatches,
                 patientContext:           $patientContext,
+                analysisType:             $analysisType,
+                dosageMismatch:           $dosageMismatch,
             );
 
             $result[] = array_merge($recommendation, [
@@ -125,17 +152,46 @@ class MedicineAnalyzeService
         return $result;
     }
 
+/**
+     * Крос-мовна нормалізація комерційних брендів ліків
+     */
+    private function normalizeBrandName(?string $name): string
+    {
+        if (!$name) {
+            return '';
+        }
+
+        // Беремо перше слово в нижньому регістрі
+        $brand = explode(' ', trim(mb_strtolower($name)))[0];
+
+        // Словник крос-мовної синонімії для популярних брендів
+        $dictionary = [
+            'стріпсілс'   => 'strepsils',
+            'стрепсілс'   => 'strepsils',
+            'нурофен'     => 'nurofen',
+            'ібупрофен'   => 'ibuprofen',
+            'парацетамол' => 'paracetamol',
+            'німесил'     => 'nimesil',
+            'декатилен'   => 'decatylen',
+            'тантум'      => 'tantum',
+        ];
+
+        return $dictionary[$brand] ?? $brand;
+    }
+
     // =========================================================================
-    // ІНТЕЛЕКТУАЛЬНИЙ СКОРИНГ
+    // ІНТЕЛЕКТУАЛЬНИЙ СКОРИНГ (Weighted Scoring Model)
     // =========================================================================
 
     /**
      * Розраховує фінальний інтелектуальний бал (0–100) та масив пояснень.
      *
-     * Алгоритм:
-     *   1. Стартуємо з базового балу (max хімічних/симптоматичних метрик)
-     *   2. Нараховуємо штрафи за обмеження пацієнта (вік, вагітність, протипоказання)
-     *   3. Фіксуємо причини у вигляді зрозумілих повідомлень
+     * Формула (Weighted Scoring Model):
+     *   SmartScore = w₁ × max(Match_exact, Match_fuzzy) + w₂ × Match_symptoms
+     *   де w₁ = 0.7 (хімічний збіг — жорсткий критерій)
+     *       w₂ = 0.3 (симптоматичний збіг — м'який критерій)
+     *
+     * Після розрахунку базового балу застосовуються штрафи за обмеження пацієнта.
      *
      * @return array{float, array<int, array{type: string, text: string}>}
      */
@@ -148,29 +204,60 @@ class MedicineAnalyzeService
         mixed  $pregnancySafe,
         array  $contraindicationMatches,
         array  $patientContext,
+        string $analysisType = 'medicine_name',
+        bool   $dosageMismatch = false
     ): array {
-        $score   = $matchPercent;
+
+        // АДАПТИВНІ ВАГИ ДЛЯ РІЗНИХ ТИПІВ ПОШУКУ
+        if ($analysisType === 'symptoms') {
+            $w1 = 0.0; // При пошуку за симптомами хімічний склад ігноруємо
+            $w2 = 1.0; // Оцінка повністю будується на симптомах (100%)
+        } else {
+            $w1 = 0.7; // Стандартна модель для аналогів (70% хімія / 30% симптоми)
+            $w2 = 0.3;
+        }
+           
         $reasons = [];
 
-        // --- Позитивні пояснення схожості ---
+        // --- 1. Базовий бал за формулою Weighted Scoring Model з адаптивними вагами ---
+               
+        $chemicalMatch = max($matchExact, $matchFuzzy);
+        $score = ($w1 * $chemicalMatch) + ($w2 * $matchSymptoms);
 
-        if ($matchExact >= 80) {
-            $reasons[] = ['type' => 'positive', 'text' => "Висока хімічна схожість — точні речовини: {$matchExact}%"];
-        } elseif ($matchFuzzy >= 80) {
-            $reasons[] = ['type' => 'positive', 'text' => "Схожі діючі речовини: {$matchFuzzy}%"];
-        } elseif ($matchSymptoms >= 60) {
-            $reasons[] = ['type' => 'positive', 'text' => "Збіг за показаннями та симптомами: {$matchSymptoms}%"];
-        } else {
-            $reasons[] = ['type' => 'neutral', 'text' => "Загальна схожість: {$matchPercent}%"];
+        // --- 2. Пояснення базового балу ---
+
+        if ($chemicalMatch >= 80) {
+            $reasons[] = ['type' => 'positive', 'text' => "Висока хімічна схожість: {$chemicalMatch}%"];
+        } elseif ($chemicalMatch >= 50) {
+            $reasons[] = ['type' => 'positive', 'text' => "Помірна хімічна схожість: {$chemicalMatch}%"];
+        } elseif ($chemicalMatch > 0) {
+            $reasons[] = ['type' => 'neutral', 'text' => "Низька хімічна схожість: {$chemicalMatch}%"];
         }
 
-        // --- Вік ---
+        // ДОДАЄМО ПЕРЕВІРКУ: Якщо речовина точна, але дози різні — виводимо попередження
+        if ($dosageMismatch) {
+            $reasons[] = [
+                'type' => 'warning',
+                'text' => 'Невідповідність дозування або форми випуску діючої речовини'
+            ];
+        }
 
+        // Створюємо округлену копію для виведення на екран (1 знак після коми)
+        $symptomsPercentage = round($matchSymptoms, 1);
+
+        if ($matchSymptoms >= 60) {
+            $reasons[] = ['type' => 'positive', 'text' => "Збіг симптомів: {$symptomsPercentage}%"];
+        } elseif ($matchSymptoms >= 30) {
+            $reasons[] = ['type' => 'neutral', 'text' => "Частковий збіг симптомів: {$symptomsPercentage}%"];
+        }
+
+        // --- 3. Штрафи за обмеження пацієнта ---
+
+        // Вік
         $age = $patientContext['age'] ?? null;
 
         if ($age !== null) {
             if (!$ageAllowed) {
-                // Штраф за невідповідний вік
                 $score -= self::PENALTY_AGE_NOT_ALLOWED;
                 $reasons[] = ['type' => 'warning', 'text' => "Вік пацієнта ({$age} р.) не відповідає умовам застосування"];
             } else {
@@ -178,8 +265,7 @@ class MedicineAnalyzeService
             }
         }
 
-        // --- Вагітність ---
-
+        // Вагітність
         $isPregnant = $patientContext['is_pregnant'] ?? false;
 
         if ($isPregnant && $pregnancySafe !== null) {
@@ -191,8 +277,7 @@ class MedicineAnalyzeService
             }
         }
 
-        // --- Протипоказання ---
-
+        // Протипоказання
         if (!empty($patientContext['contraindications'])) {
             if (!empty($contraindicationMatches)) {
                 $penalty = min(
@@ -359,14 +444,16 @@ class MedicineAnalyzeService
      */
     private function calculateExactMatchPercent(array $initial, array $candidate): float
     {
+        if (empty($initial)) {
+            return 0.0;
+        }
+
         $total = count($initial);
         $matched = 0;
 
         foreach ($initial as $name => $initialDoses) {
-            if (!array_key_exists($name, $candidate)) {
-                continue;
-            }
-            if ($this->dosesMatch($initialDoses, $candidate[$name])) {
+            // Якщо назва речовини повністю збігається — це точна речовина
+            if (array_key_exists($name, $candidate)) {
                 $matched++;
             }
         }
@@ -388,6 +475,10 @@ class MedicineAnalyzeService
      */
     private function calculateFuzzyMatchPercent(array $initial, array $candidate): float
     {
+        if (empty($initial)) {
+            return 0.0;
+        }
+        
         $total = count($initial);
         $matched = 0;
 
@@ -396,12 +487,34 @@ class MedicineAnalyzeService
             if ($foundKey === null) {
                 continue;
             }
-            if ($this->dosesMatch($initialDoses, $candidate[$foundKey])) {
-                $matched++;
+            $matched++;
+        }
+        
+        return ($matched / $total) * 100;
+    }
+
+    /**
+     * Перевіряє невідповідність дозування як для точних, так і для схожих речовин.
+     */
+    private function hasDosageMismatch(array $initial, array $candidate): bool
+    {
+        foreach ($initial as $name => $initialDoses) {
+            // 1. Якщо є точний збіг назви речовини
+            if (array_key_exists($name, $candidate)) {
+                if (!$this->dosesMatch($initialDoses, $candidate[$name])) {
+                    return true; // Дозування точної речовини не збіглося
+                }
+            } else {
+                // 2. Якщо точного немає, шукаємо нечіткий збіг (схожу речовину)
+                $foundKey = $this->findFuzzyKey($name, array_keys($candidate));
+                if ($foundKey !== null) {
+                    if (!$this->dosesMatch($initialDoses, $candidate[$foundKey])) {
+                        return true; // Дозування схожої речовини не збіглося
+                    }
+                }
             }
         }
-
-        return ($matched / $total) * 100;
+        return false;
     }
 
     /**

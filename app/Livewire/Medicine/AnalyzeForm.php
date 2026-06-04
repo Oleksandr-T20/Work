@@ -122,7 +122,7 @@ class AnalyzeForm extends Component
                 $allRecommendations = array_merge($recommendations, $localAnalogues);
 
                 // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
-                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext);
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType);
 
                 // Для основного препарату — перевіряємо обмеження через той самий сервіс
                 $medicine['age_allowed']             = $analyzer->checkAgeAllowed($medicine['min_age'] ?? '', $this->age);
@@ -173,7 +173,7 @@ class AnalyzeForm extends Component
                 $allRecommendations = array_merge($recommendations, $localAnalogues);
 
                 // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
-                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext);
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType);
 
                 $this->result = [
                     'medicine'        => $medicine,

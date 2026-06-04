@@ -5,7 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>{{ config('app.name', 'PharmAI') }}</title>
+
+        <link rel="icon" type="image/x-icon" href="{{ asset('favicon.png') }}">
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">
@@ -15,23 +17,31 @@
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="font-sans antialiased">
-        <div class="min-h-screen bg-gray-100 dark:bg-gray-900">
-            <livewire:layout.navigation />
+    <body class="font-sans antialiased text-gray-200 bg-slate-950">
+        <div class="min-h-screen relative">
+        
+            <div class="fixed inset-0 z-0 bg-cover bg-center scale-105 filter blur-[3px]" 
+                style="background-image: url('{{ asset('images/medical-bg.jpg') }}');">
+            </div>
 
-            <!-- Page Heading -->
-            @if (isset($header))
-                <header class="bg-white dark:bg-gray-800 shadow">
-                    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                        {{ $header }}
-                    </div>
-                </header>
-            @endif
+            <div class="fixed inset-0 z-10 bg-slate-950/75 backdrop-blur-[1px]"></div>
 
-            <!-- Page Content -->
-            <main>
-                {{ $slot }}
-            </main>
+            <div class="relative z-20 min-h-screen flex flex-col">
+            
+                <livewire:layout.navigation />
+
+                @if (isset($header))
+                    <header class="bg-slate-900/40 border-b border-slate-800/50 backdrop-blur-md shadow-sm">
+                        <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
+                            {{ $header }}
+                        </div>
+                    </header>
+                @endif
+
+                <main class="flex-grow">
+                    {{ $slot }}
+                </main>
+            </div>
         </div>
     </body>
 </html>
