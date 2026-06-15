@@ -22,11 +22,14 @@ class AnalyzeForm extends Component
     #[Validate('nullable|string|max:500')]
     public string $contraindications = '';
 
+    #[Validate('nullable|string|max:500')]
+    public string $currentMedications = '';
+
     #[Validate('required|in:medicine_name,symptoms')]
     public string $analysisType = 'medicine_name';
 
     // --- Стан ---
-    public string $state = 'idle'; // idle | loading | result | error | validation_error
+    public string $state = 'idle'; // idle | loading | result | error | validation_error | validation_error_medicine
 
     public ?array $result = null;
     public ?string $errorMessage = null;
@@ -104,9 +107,10 @@ class AnalyzeForm extends Component
 
                 // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
                 $patientContext = [
-                    'age'              => $this->age,
-                    'is_pregnant'      => $this->isPregnant,
+                    'age'               => $this->age,
+                    'is_pregnant'       => $this->isPregnant,
                     'contraindications' => $this->contraindications,
+                    'current_medications' => $this->currentMedications,
                 ];
 
                 // Шукаємо додаткові аналоги в локальній БД за діючими речовинами
@@ -127,6 +131,82 @@ class AnalyzeForm extends Component
                 // Для основного препарату — перевіряємо обмеження через той самий сервіс
                 $medicine['age_allowed']             = $analyzer->checkAgeAllowed($medicine['min_age'] ?? '', $this->age);
                 $medicine['contraindication_matches'] = $analyzer->checkContraindications($medicine['contraindications'] ?? [], $this->contraindications);
+
+                // =========================================================================
+                // 🧠 1. ІНТЕЛЕКТУАЛЬНА ФІЛЬТРАЦІЯ ОДДРУКІВ ТА ВНУТРІШНІХ ДУБЛІВ ЛІКІВ
+                // =========================================================================
+                $normalizeWord = function ($text) {
+                    if (!$text) return '';
+                    $firstWord = explode(' ', trim(mb_strtolower($text)))[0];
+                    $firstWord = preg_replace('/[^\p{L}\p{N}]/u', '', $firstWord);
+                    
+                    $cyr = ['а','б','в','г','д','е','є','ж','з','и','і','ї','й','к','л','м','н','о','п','р','с','т','у','ф','х','ц','ч','ш','щ','ь','ю','я'];
+                    $lat = ['a','b','v','h','d','e','ye','zh','z','y','i','yi','y','k','l','m','n','o','p','r','s','t','u','f','kh','ts','ch','sh','shch','','yu','ya'];
+                    $result = str_replace($cyr, $lat, $firstWord);
+                    
+                    // Уніфікуємо схожі латинські фонеми (c/k, g/h) для склеювання крос-мовних дублів
+                    return str_replace(['k', 'h', 'y', 'c', 'x'], ['c', 'g', 'i', 's', 'kh'], $result);
+                };
+
+                $mainNormalized = $normalizeWord($medicine['name'] ?? '');
+
+                // Етап А: Фільтруємо аналоги щодо головного препарату
+                $filtered = array_filter($filtered, function($rec) use ($mainNormalized, $normalizeWord) {
+                    $recNormalized = $normalizeWord($rec['name'] ?? '');
+                    if (empty($recNormalized) || empty($mainNormalized)) return true;
+                    return levenshtein($mainNormalized, $recNormalized) > 2;
+                });
+
+                // Етап Б: Видаляємо дублікати МІЖ самими аналогами (напр. Кардіомагніл та Cardiomagnyl)
+                $seenAnalogs = [];
+                $filtered = array_filter($filtered, function($rec) use ($normalizeWord, &$seenAnalogs) {
+                    $recNormalized = $normalizeWord($rec['name'] ?? '');
+                    foreach ($seenAnalogs as $seen) {
+                        if (levenshtein($seen, $recNormalized) <= 2) {
+                            return false; 
+                        }
+                    }
+                    $seenAnalogs[] = $recNormalized;
+                    return true;
+                });
+                $filtered = array_values($filtered);
+
+                // =========================================================================
+                // 🧠 2. АВТОМАТИЧНЕ ВИЯВЛЕННЯ КОНФЛІКТІВ ДЛЯ ГОЛОВНОГО ПРЕПАРАТУ
+                // =========================================================================
+                $medicine['interaction_matches'] = [];
+                $medicine['interaction_details'] = [];
+
+                if (!empty($this->currentMedications)) {
+                    foreach ($filtered as $rec) {
+                        if (($rec['match_exact'] ?? 0) == 100) {
+                            foreach ($rec['smart_reasons'] ?? [] as $reason) {
+                                $textLower = mb_strtolower($reason['text'] ?? '');
+                                if (str_contains($textLower, 'взаємоді') || str_contains($textLower, 'несумісн') || str_contains($textLower, 'конфлікт') || str_contains($textLower, 'подвоєн')) {
+                                    $medicine['interaction_matches'][] = $this->currentMedications;
+                                    
+                                    // Очищаємо назву аналога та його латинські/кириличні синоніми всередині речення
+                                    $analogFirstWord = explode(' ', trim($rec['name']))[0];
+                                    $cleanText = str_ireplace($analogFirstWord, $medicine['name'], $reason['text']);
+                                    
+                                    $synonymsMap = [
+                                        'cardiomagnyl' => 'Кардіомагніл', 'кардіомагніл' => 'Cardiomagnyl',
+                                        'enap' => 'Енап', 'енап' => 'Enap', 'nimesil' => 'Німесил', 'німесил' => 'Nimesil'
+                                    ];
+                                    $analogFirstWordLower = mb_strtolower($analogFirstWord);
+                                    if (isset($synonymsMap[$analogFirstWordLower])) {
+                                        $cleanText = str_ireplace($synonymsMap[$analogFirstWordLower], $medicine['name'], $cleanText);
+                                    }
+                                    
+                                    $medicine['interaction_details'][] = $cleanText;
+                                }
+                            }
+                        }
+                    }
+                    $medicine['interaction_matches'] = array_values(array_unique($medicine['interaction_matches']));
+                    $medicine['interaction_details'] = array_values(array_unique($medicine['interaction_details']));
+                }
+                // =========================================================================
 
                 $this->result = [
                     'medicine'        => $medicine,
@@ -155,9 +235,10 @@ class AnalyzeForm extends Component
 
                 // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
                 $patientContext = [
-                    'age'              => $this->age,
-                    'is_pregnant'      => $this->isPregnant,
+                    'age'               => $this->age,
+                    'is_pregnant'       => $this->isPregnant,
                     'contraindications' => $this->contraindications,
+                    'current_medications' => $this->currentMedications,
                 ];
 
                 // Шукаємо додаткові аналоги в локальній БД за діючими речовинами

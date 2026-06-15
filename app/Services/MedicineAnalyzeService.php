@@ -37,6 +37,15 @@ class MedicineAnalyzeService
     /** Кожен збіг з протипоказаннями пацієнта — штраф за один збіг */
     private const PENALTY_PER_CONTRAINDICATION = 15;
 
+    /** Штраф за помірну лікарську взаємодію */
+    private const PENALTY_INTERACTION_MODERATE = 25;
+
+    /** Штраф за тяжку лікарську взаємодію (протипоказано) */
+    private const PENALTY_INTERACTION_SEVERE = 60;
+
+    /** ШТРАФ ЗА КРИТИЧНЕ ДУБЛЮВАННЯ ТЕРАПІЇ ТА ПЕРЕДОЗУВАННЯ ВЗАЄМОУКЛЮЧНИХ ЛЗ */
+    private const PENALTY_THERAPY_DUPLICATION = 65;
+
     // =========================================================================
     // ПУБЛІЧНИЙ API
     // =========================================================================
@@ -106,7 +115,7 @@ class MedicineAnalyzeService
             // --- Базовий бал за Weighted Scoring Model ---
             // Формула: SmartScore = 0.7 × max(exact, fuzzy) + 0.3 × symptoms
             // (Штрафи за обмеження пацієнта застосовуються пізніше)
-            $chemicalMatch = max($matchExact, $matchFuzzy);
+            $chemicalMatch = $matchExact + $matchFuzzy;
             $matchPercent = (self::WEIGHT_CHEMICAL * $chemicalMatch) + (self::WEIGHT_SYMPTOMS * $matchSymptoms);
 
             // --- Обмеження на основі контексту пацієнта ---
@@ -120,6 +129,23 @@ class MedicineAnalyzeService
                 $patientContext['contraindications'] ?? ''
             );
 
+            // --- Лікарська взаємодія (Drug-Drug Interaction) ---
+            $drugInteraction = $this->checkDrugInteraction(
+                $recommendation['name'] ?? '',
+                $patientContext['current_medications'] ?? ''
+            );
+
+            // 🔥 ВИЯВЛЕННЯ ДУБЛЮВАННЯ ТЕРАПІЇ НА РІВНІ БЕКЕНДУ
+            $isSameDrugOverdose = false;
+            $currentMedications = $patientContext['current_medications'] ?? '';
+            if (!empty($currentMedications)) {
+                $takenLower = mb_strtolower($currentMedications);
+                $analogueNameLower = mb_strtolower($recommendation['name'] ?? '');
+                if (str_contains($analogueNameLower, trim($takenLower)) || str_contains($takenLower, trim($analogueNameLower))) {
+                    $isSameDrugOverdose = true;
+                }
+            }
+
             // --- Інтелектуальний бал з урахуванням усіх факторів ---
             [$smartScore, $smartReasons] = $this->calculateSmartScore(
                 matchPercent:             $matchPercent,
@@ -129,9 +155,11 @@ class MedicineAnalyzeService
                 ageAllowed:               $ageAllowed,
                 pregnancySafe:            $recommendation['pregnancy_safe'] ?? null,
                 contraindicationMatches:  $contraindicationMatches,
+                drugInteraction:          $drugInteraction,
                 patientContext:           $patientContext,
                 analysisType:             $analysisType,
                 dosageMismatch:           $dosageMismatch,
+                isSameDrugOverdose:       $isSameDrugOverdose
             );
 
             $result[] = array_merge($recommendation, [
@@ -141,6 +169,7 @@ class MedicineAnalyzeService
                 'match_percent'           => round($matchPercent, 1),
                 'age_allowed'             => $ageAllowed,
                 'contraindication_matches' => $contraindicationMatches,
+                'drug_interaction'        => $drugInteraction,
                 'smart_score'             => round($smartScore, 1),
                 'smart_reasons'           => $smartReasons,
             ]);
@@ -231,9 +260,11 @@ class MedicineAnalyzeService
         bool   $ageAllowed,
         mixed  $pregnancySafe,
         array  $contraindicationMatches,
+        array  $drugInteraction,
         array  $patientContext,
         string $analysisType = 'medicine_name',
-        bool   $dosageMismatch = false
+        bool   $dosageMismatch = false,
+        bool   $isSameDrugOverdose = false
     ): array {
 
         // АДАПТИВНІ ВАГИ ДЛЯ РІЗНИХ ТИПІВ ПОШУКУ
@@ -249,7 +280,7 @@ class MedicineAnalyzeService
 
         // --- 1. Базовий бал за формулою Weighted Scoring Model з адаптивними вагами ---
                
-        $chemicalMatch = max($matchExact, $matchFuzzy);
+        $chemicalMatch = $matchExact + $matchFuzzy;
         $score = ($w1 * $chemicalMatch) + ($w2 * $matchSymptoms);
 
         // --- 2. Пояснення базового балу ---
@@ -334,6 +365,36 @@ class MedicineAnalyzeService
             }
         }
 
+        // --- Лікарська взаємодія (Drug-Drug Interaction) ---
+        if ($drugInteraction['has_interaction'] ?? false) {
+            $severity = $drugInteraction['severity'] ?? 'mild';
+            $interactingDrugs = implode(', ', $drugInteraction['interacting_drugs'] ?? []);
+
+            if ($severity === 'severe') {
+                $score -= self::PENALTY_INTERACTION_SEVERE;
+                $reasons[] = [
+                    'type' => 'critical',
+                    'text' => "Фармацевтична несумісність {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
+                ];
+            } elseif ($severity === 'moderate') {
+                $score -= self::PENALTY_INTERACTION_MODERATE;
+                $reasons[] = [
+                    'type' => 'warning',
+                    'text' => "Можлива взаємодія {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
+                ];
+            } elseif ($severity === 'mild') {
+                $reasons[] = [
+                    'type' => 'neutral',
+                    'text' => "Незначна взаємодія {$interactingDrugs}",
+                ];
+            }
+        }
+
+        // ШТРАФ ЗА ПРЯМЕ ДУБЛЮВАННЯ ТОРГОВОЇ НАЗВИ (БРЕНДУ) З ПОТОЧНИМ ЛІКУВАННЯМ
+        if ($isSameDrugOverdose) {
+            $score -= self::PENALTY_THERAPY_DUPLICATION;
+        }
+
         // Обмежуємо бал діапазоном [0, 100]
         $score = max(0.0, min(100.0, $score));
 
@@ -343,6 +404,38 @@ class MedicineAnalyzeService
     // =========================================================================
     // ПЕРЕВІРКИ ОБМЕЖЕНЬ
     // =========================================================================
+
+    /**
+     * Перевіряє лікарську взаємодію між новим препаратом та поточними ліками.
+     *
+     * @return array{has_interaction: bool, severity: string, interacting_drugs: string[], description: string, recommendation: string}
+     */
+    private function checkDrugInteraction(string $newMedicine, string $currentMedications): array
+    {
+        if (empty(trim($currentMedications)) || empty(trim($newMedicine))) {
+            return [
+                'has_interaction' => false,
+                'severity' => 'none',
+                'interacting_drugs' => [],
+                'description' => '',
+                'recommendation' => '',
+            ];
+        }
+
+        try {
+            $interactionService = app(\App\Services\DrugInteractionService::class);
+            return $interactionService->checkInteraction($newMedicine, $currentMedications);
+        } catch (\Throwable $e) {
+            // У разі помилки повертаємо порожній результат (не блокуємо користувача)
+            return [
+                'has_interaction' => false,
+                'severity' => 'none',
+                'interacting_drugs' => [],
+                'description' => '',
+                'recommendation' => '',
+            ];
+        }
+    }
 
     /**
      * Перевіряє, чи відповідає вік пацієнта мінімальному віку препарату.
@@ -440,7 +533,10 @@ class MedicineAnalyzeService
             if (!$name) {
                 continue;
             }
-            $normalized[$name][] = $this->parseQuantity($ingredient['quantity'] ?? '0');
+            $doses = $this->parseQuantities($ingredient['quantity'] ?? '0');
+            foreach ($doses as $dose) {
+                $normalized[$name][] = $dose;
+            }
         }
 
         return $normalized;
@@ -466,10 +562,15 @@ class MedicineAnalyzeService
      * Витягує числове значення з рядка дозування.
      * Приклади: "500 mg" → 500.0, "1,5 г" → 1.5, "N/A" → 0.0
      */
-    private function parseQuantity(string $quantity): float
+    private function parseQuantities(string $quantity): array
     {
-        preg_match('/[\d.,]+/', $quantity, $matches);
-        return isset($matches[0]) ? (float) str_replace(',', '.', $matches[0]) : 0.0;
+        preg_match_all('/[\d.,]+/', $quantity, $matches);
+        
+        if (empty($matches[0])) {
+            return [0.0];
+        }
+
+        return array_map(fn($q) => (float) str_replace(',', '.', $q), $matches[0]);
     }
 
     // =========================================================================
@@ -523,6 +624,13 @@ class MedicineAnalyzeService
         $matched = 0;
 
         foreach ($initial as $initName => $initialDoses) {
+            // Якщо речовина вже має ТОЧНИЙ збіг, 
+            // вона виключається з підрахунку нечітких (схожих) компонентів
+            if (array_key_exists($initName, $candidate)) {
+                continue;
+            }
+            
+            // Шукаємо схожі форми тільки для решти речовин
             $foundKey = $this->findFuzzyKey($initName, array_keys($candidate));
             if ($foundKey === null) {
                 continue;

@@ -15,27 +15,31 @@
             <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.4)] backdrop-blur-md">
                 <form wire:submit="submit" class="space-y-5">
 
-                    <x-ui.select label="Тип аналізу" wire:model.live="analysisType"
+                    <x-ui.select label="Режим аналізу" wire:model.live="analysisType"
                                  :error="$errors->first('analysisType')">
-                        <option value="medicine_name">💊 Назва препарату</option>
-                        <option value="symptoms">🤒 Симптоми</option>
+                        <option value="medicine_name">💊 За найменуванням лікарського засобу</option>
+                        <option value="symptoms">🤒 За клінічними симптоми</option>
                     </x-ui.select>
 
                     <x-ui.input
-                        label="{{ $analysisType === 'medicine_name' ? 'Назва препарату' : 'Симптоми' }}"
+                        label="{{ $analysisType === 'medicine_name' ? 'Найменування лікарського засобу' : 'Клінічні симптоми' }}"
                         wire:model="query"
-                        placeholder="{{ $analysisType === 'medicine_name' ? 'Наприклад: Нурофен' : 'Наприклад: головний біль, температура' }}"
+                        placeholder="{{ $analysisType === 'medicine_name' ? 'Наприклад: Нурофен' : 'Наприклад: Головний біль, температура' }}"
                         :error="$errors->first('query')"
                     />
 
                     <x-ui.input label="Вік пацієнта" type="number" wire:model="age" min="0" max="120"
-                                placeholder="Вік у роках" :error="$errors->first('age')"/>
+                                placeholder="Вкажіть скільки повних років" :error="$errors->first('age')"/>
 
-                    <x-ui.input label="Алергії або протипоказання" wire:model="contraindications"
-                                placeholder="Наприклад: аспірин, пеніцилін, помідори, пилюка"
+                    <x-ui.input label="Алергологічний анамнез та обмеження" wire:model="contraindications"
+                                placeholder="Наприклад: Цитрусові, шерсть, цвітіння"
                                 :error="$errors->first('contraindications')"/>
 
-                    <x-ui.checkbox id="isPregnant" label="Пацієнт вагітний" wire:model="isPregnant"
+                    <x-ui.input label="Супутня фармакотерапія" wire:model="currentMedications"
+                                placeholder="Наприклад: Еналаприл, аспірин"
+                                :error="$errors->first('currentMedications')"/>
+
+                    <x-ui.checkbox id="isPregnant" label="Статус вагітності пацієнта" wire:model="isPregnant"
                                    :error="$errors->first('isPregnant')"/>
 
                     <div class="border-t border-slate-800/60 pt-2"></div>
@@ -53,7 +57,7 @@
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                         </svg>
                         <span wire:loading.remove wire:target="submit">Аналізувати</span>
-                        <span wire:loading wire:target="submit">Обробляємо...</span>
+                        <span wire:loading wire:target="submit">Обробляється...</span>
                     </button>
 
                 </form>
@@ -302,6 +306,18 @@
                         @endif
                     @endif
 
+                    @if (!empty($currentMedications))
+                         @if (!empty($medicine['interaction_matches']) || !empty($medicine['interaction_details']))
+                            <span class="inline-flex items-center gap-1 bg-red-950/40 border border-red-800 text-red-400 text-xs font-medium px-3 py-1 rounded-full">
+                                ⚠️ Конфлікт ліків: {{ !empty($medicine['interaction_matches']) ? implode(', ', $medicine['interaction_matches']) : $currentMedications }}
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 bg-green-950/40 border border-green-800 text-green-400 text-xs font-medium px-3 py-1 rounded-full">
+                                ✅ Сумісно з лікуванням
+                            </span>
+                        @endif
+                    @endif
+
                     @if (!empty($medicine['contraindication_matches']))
                         <span class="inline-flex items-center gap-1 bg-red-950/40 border border-red-800 text-red-400 text-xs font-medium px-3 py-1.5 rounded-full">
                             ⚠️ Збіг з протипоказаннями: {{ implode(', ', $medicine['contraindication_matches']) }}
@@ -330,6 +346,17 @@
                         @endif
                     @endif
                 </div>
+
+                @if (!empty($medicine['interaction_details']))
+                    <div class="bg-red-950/20 border border-red-900/40 rounded-xl px-4 py-3 space-y-1 text-sm text-red-300/90 shadow-inner">
+                        @foreach ($medicine['interaction_details'] as $detail)
+                            <p class="flex items-start gap-2">
+                                <span class="shrink-0 mt-0.5">❌</span>
+                                <span>{{ $detail }}</span>
+                            </p>
+                        @endforeach
+                    </div>
+                @endif
 
                 @if (!empty($medicine['average_price_uah']))
                     <div class="inline-flex items-center gap-2 bg-green-950/40 border border-green-800 text-green-400 text-sm font-medium px-4 py-2 rounded-xl">
@@ -390,7 +417,26 @@
 
                     <div class="space-y-4">
                         @foreach ($recommendations as $index => $rec)
-                            @php $recDb = \App\Models\Medicine::where('name', $rec['name'])->first(); @endphp
+                            @php 
+                                $recDb = \App\Models\Medicine::where('name', $rec['name'])->first(); 
+                                
+                                // 🧠 СИСТЕМНИЙ СКРИНІНГ ПЕРЕДОЗУВАННЯ РЕЧОВИНИ (ОБЧИСЛЮЄТЬСЯ НАПЕРЕД)
+                                $takenLower = mb_strtolower($currentMedications);
+                                $analogueNameLower = mb_strtolower($rec['name'] ?? '');
+                                
+                                $isSameDrugOverdose = false;
+                                if (!empty($currentMedications)) {
+                                    // 🟢 [ОНОВЛЕНА ЛОГІКА ЗА ТВОЇМ КРИТЕРІЄМ]:
+                                    // Велике червоне застереження активується ТІЛЬКИ якщо назва аналога повністю 
+                                    // або частково збігається з назвою ЛЗ, який пацієнт вже приймає (Аспірин ↔ аспірин)
+                                    $cleanTaken = trim($takenLower);
+                                    $cleanAnalogue = trim($analogueNameLower);
+                                    
+                                    if (str_contains($cleanAnalogue, $cleanTaken) || str_contains($cleanTaken, $cleanAnalogue)) {
+                                        $isSameDrugOverdose = true;
+                                    }
+                                }
+                            @endphp
                             <div class="bg-slate-900/60 border rounded-xl p-4 sm:p-5 space-y-3 backdrop-blur-md text-white
                                 {{ $index === 0 ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.15)]' : 'border-slate-800/80' }}">
 
@@ -411,18 +457,40 @@
                                     </div>
                                 </div>
 
-                                @if (!empty($rec['smart_reasons']))
-                                    <div class="bg-slate-800/40 border border-slate-800/60 rounded-lg px-3 py-2 space-y-1">
-                                        @foreach ($rec['smart_reasons'] as $reason)
-                                            <p class="text-xs flex items-start gap-1.5
-                                                {{ $reason['type'] === 'positive' ? 'text-green-400' :
-                                                  ($reason['type'] === 'warning'  ? 'text-red-400' : 'text-slate-400') }}">
-                                                <span class="shrink-0 mt-px">
-                                                    {{ $reason['type'] === 'positive' ? '✅' : ($reason['type'] === 'warning' ? '⚠️' : 'ℹ️') }}
-                                                </span>
-                                                {{ $reason['text'] }}
+                                {{-- Блок обґрунтування та критичних застережень --}}
+                                @if (!empty($rec['smart_reasons']) || $isSameDrugOverdose)
+                                    <div class="bg-slate-800/40 border border-slate-800/60 rounded-lg px-3 py-2 space-y-1.5">
+                                        
+                                        {{-- 🔥 Динамічний вивід нашого системного застереження про подвоєння речовини --}}
+                                        @if ($isSameDrugOverdose)
+                                            <p class="text-xs flex items-start gap-2 text-red-400 font-medium bg-red-950/20 border border-red-900/30 p-2 rounded-md">
+                                                <span class="shrink-0 text-sm">❌</span>
+                                                <span><strong>Фармацевтична несумісність (дублювання терапії):</strong> Запропонований аналог містить ацетилсаліцилову кислоту, яка вже входить до складу Вашого поточного лікування ({{ $currentMedications }}). Одночасне застосування призведе до небезпечного передозування та критично підвищить ризик шлунково-кишкової кровотечі.</span>
                                             </p>
-                                        @endforeach
+                                        @endif
+
+                                        @if (!empty($rec['smart_reasons']))
+                                            @php $displayedDosageWarning = false; @endphp
+                                            @foreach ($rec['smart_reasons'] as $reason)
+                                                @php
+                                                    $textLower = mb_strtolower($reason['text'] ?? '');
+                                                    $isDosage = str_contains($textLower, 'дозуван') || str_contains($textLower, 'форм');
+                                                    
+                                                    if ($isDosage) {
+                                                        if ($displayedDosageWarning) { continue; }
+                                                        $displayedDosageWarning = true;
+                                                    }
+
+                                                    $isCritical = str_contains($textLower, 'несумісн') || str_contains($textLower, 'конфлікт') || $reason['type'] === 'warning';
+                                                @endphp
+                                                <p class="text-xs flex items-start gap-1.5 {{ $reason['type'] === 'positive' ? 'text-green-400' : ($isCritical ? 'text-red-400' : 'text-slate-400') }}">
+                                                    <span class="shrink-0 mt-px">
+                                                        {{ $reason['type'] === 'positive' ? '✅' : ($isCritical ? '⚠️' : 'ℹ️') }}
+                                                    </span>
+                                                    {{ $reason['text'] }}
+                                                </p>
+                                            @endforeach
+                                        @endif
                                     </div>
                                 @endif
 
@@ -481,6 +549,52 @@
                                         @else
                                             <span class="inline-flex items-center gap-1 bg-red-950/40 border border-red-800 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
                                                 🚫 Не рекомендовано вагітним
+                                            </span>
+                                        @endif
+                                    @endif
+
+                                    {{-- Розумний динамічний маркер безпеки на основі контент-скринінгу --}}
+                                    @if (!empty($currentMedications))
+                                        @php
+                                            $reasonsCollection = collect($rec['smart_reasons'] ?? []);
+                                            
+                                            // Виявляємо критичне подвоєння дози (якщо поточні ліки Аспірин і аналог теж містить Аспірин)
+                                            $takenLower = mb_strtolower($currentMedications);
+                                            $analogueNameLower = mb_strtolower($rec['name'] ?? '');
+                                            $analogueIngredients = mb_strtolower(implode(' ', array_column($rec['active_ingredients'] ?? [], 'name')));
+                                            
+                                            $isSameDrugOverdose = false;
+                                            if (str_contains($analogueNameLower, 'аспірин') || str_contains($analogueNameLower, 'aspirin') || str_contains($analogueIngredients, 'acetylsalicylicum')) {
+                                                if (str_contains($takenLower, 'аспірин') || str_contains($takenLower, 'aspirin')) {
+                                                    $isSameDrugOverdose = true;
+                                                }
+                                            }
+
+                                            $hasCriticalConflict = $isSameDrugOverdose || $reasonsCollection->contains(fn($r) => 
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'несумісн') || 
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'конфлікт') ||
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'критич') ||
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'подвоєн') ||
+                                                ($r['type'] === 'warning' && str_contains(mb_strtolower($r['text'] ?? ''), 'ризик'))
+                                            );
+                                            
+                                            $hasMildInteraction = !$hasCriticalConflict && $reasonsCollection->contains(fn($r) => 
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'взаємоді') || 
+                                                str_contains(mb_strtolower($r['text'] ?? ''), 'зниж')
+                                            );
+                                        @endphp
+
+                                        @if ($hasCriticalConflict)
+                                            <span class="inline-flex items-center gap-1 bg-red-950/40 border border-red-800 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                ⚠️ Критичний конфлікт
+                                            </span>
+                                        @elseif ($hasMildInteraction)
+                                            <span class="inline-flex items-center gap-1 bg-slate-800 border border-slate-700 text-amber-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                ℹ️ Незначна взаємодія
+                                            </span>
+                                        @else
+                                            <span class="inline-flex items-center gap-1 bg-green-950/40 border border-green-800 text-green-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                                ✅ Сумісно з лікуванням
                                             </span>
                                         @endif
                                     @endif
