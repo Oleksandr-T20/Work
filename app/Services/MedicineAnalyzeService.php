@@ -146,8 +146,36 @@ class MedicineAnalyzeService
             ]);
         }
 
-        // Сортуємо за інтелектуальним балом (найкращий варіант — першим)
-        usort($result, fn($a, $b) => $b['smart_score'] <=> $a['smart_score']);
+        // =========================================================================
+        // ІНТЕЛЕКТУАЛЬНА ДЕДУПЛІКАЦІЯ ДАНИХ (DATA CLEANING)
+        // =========================================================================
+        if (!empty($result)) {
+            $uniqueRecommendations = [];
+
+            foreach ($result as $item) {
+                // 1. Очищаємо назву від тексту в дужках: "Барбовал (Barboval)" -> "Барбовал"
+                $cleanName = preg_replace('/\s*\(.*?\)\s*/u', '', $item['name']);
+                
+                // 2. Нормалізуємо ключ для порівняння двійників
+                $normalizedKey = mb_strtolower(trim($cleanName));
+
+                // 3. Якщо такого препарату немає — додаємо, якщо є — залишаємо повноцінніший за Smart Score
+                if (!isset($uniqueRecommendations[$normalizedKey])) {
+                    $uniqueRecommendations[$normalizedKey] = $item;
+                } else {
+                    if ($item['smart_score'] > $uniqueRecommendations[$normalizedKey]['smart_score']) {
+                        $uniqueRecommendations[$normalizedKey] = $item;
+                    }
+                }
+            }
+
+            // Переіндексовуємо масив
+            $result = array_values($uniqueRecommendations);
+
+            // 4. Фінальне сортування за спаданням балу
+            usort($result, fn($a, $b) => $b['smart_score'] <=> $a['smart_score']);
+        }
+        // =========================================================================
 
         return $result;
     }
@@ -226,12 +254,24 @@ class MedicineAnalyzeService
 
         // --- 2. Пояснення базового балу ---
 
-        if ($chemicalMatch >= 80) {
-            $reasons[] = ['type' => 'positive', 'text' => "Висока хімічна схожість: {$chemicalMatch}%"];
-        } elseif ($chemicalMatch >= 50) {
-            $reasons[] = ['type' => 'positive', 'text' => "Помірна хімічна схожість: {$chemicalMatch}%"];
-        } elseif ($chemicalMatch > 0) {
-            $reasons[] = ['type' => 'neutral', 'text' => "Низька хімічна схожість: {$chemicalMatch}%"];
+        if ($analysisType !== 'symptoms') {
+            // Створюємо округлену копію для хімічного збігу (1 знак після коми)
+            $chemicalPercentage = round($chemicalMatch, 1);
+
+            if ($chemicalMatch >= 80) {
+                $reasons[] = ['type' => 'positive', 'text' => "Висока хімічна схожість: {$chemicalPercentage}%"];
+            } elseif ($chemicalMatch >= 50) {
+                $reasons[] = ['type' => 'positive', 'text' => "Помірна хімічна схожість: {$chemicalPercentage}%"];
+            } elseif ($chemicalMatch > 0) {
+                $reasons[] = ['type' => 'neutral', 'text' => "Низька хімічна схожість: {$chemicalPercentage}%"];
+            }
+            
+            if ($dosageMismatch) {
+                $reasons[] = [
+                    'type' => 'warning',
+                    'text' => 'Дозування або форма випуску діючої речовини відрізняється від оригіналу'
+                ];
+            }
         }
 
         // ДОДАЄМО ПЕРЕВІРКУ: Якщо речовина точна, але дози різні — виводимо попередження

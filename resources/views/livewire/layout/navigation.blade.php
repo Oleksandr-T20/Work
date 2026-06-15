@@ -31,7 +31,7 @@ new class extends Component {
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                     <x-nav-link :href="route('medicine.analyze')" :active="request()->routeIs('medicine.analyze')"
                                 wire:navigate>
-                        Аналіз препаратів
+                        PharmAI
                     </x-nav-link>
                 </div>
             </div>

@@ -265,12 +265,12 @@
                     <h2 class="text-xl font-bold text-white">{{ $medicine['name'] }}</h2>
                 </div>
 
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                        {{ $analysisType === 'medicine_name' ? 'Показання' : 'Симптоми' }}
-                    </p>
-                    <p class="text-sm text-slate-300">{{ $medicine['symptoms'] }}</p>
-                </div>
+                @if ($analysisType === 'medicine_name')
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Показання</p>
+                        <p class="text-sm text-slate-300">{{ $medicine['symptoms'] }}</p>
+                    </div>
+                @endif
 
                 <div class="flex flex-wrap gap-2">
                     @if (!empty($medicine['min_age']))
