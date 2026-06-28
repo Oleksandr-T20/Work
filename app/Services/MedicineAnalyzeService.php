@@ -361,31 +361,40 @@ class MedicineAnalyzeService
                     'text' => 'Збіг з вказаними протипоказаннями: ' . implode(', ', $contraindicationMatches),
                 ];
             } else {
-                $reasons[] = ['type' => 'positive', 'text' => 'Протипоказань за Вашим профілем не виявлено'];
+                // 🟢 Зрозумілий людейноорієнтований текст для обмежень
+                $reasons[] = ['type' => 'positive', 'text' => 'Препарат сумісний із вказаними Вами алергіями та обмеженнями здоров\'я'];
             }
         }
 
         // --- Лікарська взаємодія (Drug-Drug Interaction) ---
-        if ($drugInteraction['has_interaction'] ?? false) {
-            $severity = $drugInteraction['severity'] ?? 'mild';
-            $interactingDrugs = implode(', ', $drugInteraction['interacting_drugs'] ?? []);
+        if (!empty($patientContext['current_medications'])) {
+            if ($drugInteraction['has_interaction'] ?? false) {
+                $severity = $drugInteraction['severity'] ?? 'mild';
+                $interactingDrugs = implode(', ', $drugInteraction['interacting_drugs'] ?? []);
 
-            if ($severity === 'severe') {
-                $score -= self::PENALTY_INTERACTION_SEVERE;
+                if ($severity === 'severe') {
+                    $score -= self::PENALTY_INTERACTION_SEVERE;
+                    $reasons[] = [
+                        'type' => 'critical',
+                        'text' => "Фармацевтична несумісність {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
+                    ];
+                } elseif ($severity === 'moderate') {
+                    $score -= self::PENALTY_INTERACTION_MODERATE;
+                    $reasons[] = [
+                        'type' => 'warning',
+                        'text' => "Можлива взаємодія {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
+                    ];
+                } elseif ($severity === 'mild') {
+                    $reasons[] = [
+                        'type' => 'neutral',
+                        'text' => "Незначна взаємодія {$interactingDrugs}",
+                    ];
+                }
+            } else {
+                // 🟢 Якщо поточне лікування вказано, але конфліктів немає — виводимо зелене підтвердження
                 $reasons[] = [
-                    'type' => 'critical',
-                    'text' => "Фармацевтична несумісність {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
-                ];
-            } elseif ($severity === 'moderate') {
-                $score -= self::PENALTY_INTERACTION_MODERATE;
-                $reasons[] = [
-                    'type' => 'warning',
-                    'text' => "Можлива взаємодія {$interactingDrugs}: " . ($drugInteraction['description'] ?? ''),
-                ];
-            } elseif ($severity === 'mild') {
-                $reasons[] = [
-                    'type' => 'neutral',
-                    'text' => "Незначна взаємодія {$interactingDrugs}",
+                    'type' => 'positive', 
+                    'text' => 'Конфліктів чи негативних взаємодій із Вашим поточним лікуванням не виявлено'
                 ];
             }
         }
@@ -550,12 +559,56 @@ class MedicineAnalyzeService
      */
     private function normalizeSymptoms(string $symptoms): array
     {
+        // 1. Універсально збагачуємо пошуковий вектор медичними синонімами
+        $symptoms = $this->expandColloquialTerms($symptoms);
+
+        // 2. Стандартна токенізація (розбиття на окремі слова)
         $words = preg_split('/[\s,;.()\-]+/u', mb_strtolower($symptoms));
 
         return array_values(array_unique(array_filter(
             $words,
             fn($word) => mb_strlen($word) >= self::MIN_SYMPTOM_WORD_LENGTH
         )));
+    }
+
+    /**
+     * 🧠 УНІВЕРСАЛЬНА БАЗА ЗНАНЬ СЕМАНТИЧНИХ СИНОНІМІВ
+     * Транслює побутові скарги пацієнта (за морфологічним коренем) у наукову термінологію.
+     */
+    private function expandColloquialTerms(string $symptoms): string
+    {
+        $lower = mb_strtolower($symptoms);
+        
+        // Карта відповідностей: "корінь слова пацієнта" => ["офіційні медичні терміни з бази ЛЗ"]
+        // Цей масив можна легко винести в окремий файл config/medical_terms.php або завантажувати з БД
+        $semanticDictionary = [
+            'тис'   => ['гіпертензія', 'артеріальна', 'гіпертонія', 'тиск'],
+            'гіперт'=> ['гіпертензія', 'артеріальна', 'гіпертонія'],
+            'серц'  => ['серцева', 'недостатність', 'кардіалгія', 'ішемічна'],
+            'діаб'  => ['цукровий', 'діабет'],
+            'голов' => ['цефалгія', 'головний', 'біль'],
+            'шлун'  => ['гастралгія', 'шлунково-кишкові', 'спазми', 'шлунок'],
+            'каш'   => ['кашель', 'бронхіт', 'респіраторні'],
+            'темп'  => ['лихоманка', 'гіпертермія', 'підвищена', 'температура'],
+            'оч'    => ['офтальмологічні', 'очні', 'кон\'юнктивіт'],
+            'печін' => ['гепатопротектори', 'печінкова', 'холецистит'],
+        ];
+
+        $enrichedTokens = [];
+
+        // Перевіряємо наявність коренів у запиті пацієнта
+        foreach ($semanticDictionary as $root => $medicalTerms) {
+            if (str_contains($lower, $root)) {
+                $enrichedTokens = array_merge($enrichedTokens, $medicalTerms);
+            }
+        }
+
+        // Якщо знайдено збіги, склеюємо їх з основним текстом запиту
+        if (!empty($enrichedTokens)) {
+            $symptoms .= ' ' . implode(' ', array_unique($enrichedTokens));
+        }
+
+        return $symptoms;
     }
 
     /**
@@ -672,8 +725,20 @@ class MedicineAnalyzeService
      */
     private function findFuzzyKey(string $initName, array $candidateKeys): ?string
     {
+        // Витягуємо перше (головне) слово діючої речовини (напр. "magnesii")
+        $initFirstWord = explode(' ', trim($initName))[0];
+        
         foreach ($candidateKeys as $candName) {
+            // Базова перевірка на випадок однослівних назв речовин
             if (str_contains($candName, $initName) || str_contains($initName, $candName)) {
+                return $candName;
+            }
+
+            // Нова логіка для багатослівних латинських солей:
+            $candFirstWord = explode(' ', trim($candName))[0];
+            
+            // Якщо головні елементи збігаються (напр. magnesii ↔ magnesii), а солі різні
+            if (!empty($initFirstWord) && $initFirstWord === $candFirstWord && strlen($initFirstWord) > 3) {
                 return $candName;
             }
         }

@@ -54,6 +54,19 @@ class AnalyzeForm extends Component
             'analysisType'      => 'required|in:medicine_name,symptoms',
         ];
     }
+    /**
+     * Клінічні повідомлення про помилки валідації українською мовою
+     */
+    protected function messages(): array
+    {
+        return [
+            'query.required' => 'Поле введення є обов\'язковим для заповнення.',
+            'age.required'   => 'Поле введення є обов\'язковим для заповнення.',
+            'age.integer'    => 'Вік пацієнта має бути вказаний цілим числом.',
+            'age.min'        => 'Вік пацієнта не може бути меншим за 0 років.',
+            'age.max'        => 'Вік пацієнта не може перевищувати 120 років.',
+        ];
+    }
 
     public function submit(): void
     {
