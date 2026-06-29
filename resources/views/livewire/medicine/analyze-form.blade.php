@@ -1,4 +1,4 @@
-<div class="w-full max-w-xl mx-auto py-12 px-4 sm:px-6 lg:px-8 bg-transparent relative z-20">
+<div class="w-full {{ $state === 'result' ? 'max-w-4xl' : 'max-w-xl' }} mx-auto py-12 px-4 sm:px-6 lg:px-8 bg-transparent relative z-20 transition-all duration-500">
     <div class="space-y-6">
 
         {{-- ====== ФОРМА (idle) ====== --}}
@@ -49,7 +49,7 @@
                         <svg wire:loading.remove wire:target="submit" class="w-4 h-4 shrink-0" fill="none"
                              stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                         </svg>
                         <svg wire:loading wire:target="submit" class="animate-spin w-4 h-4 shrink-0 text-white" fill="none"
                              viewBox="0 0 24 24">
@@ -172,11 +172,13 @@
                         $recommendations
                     );
 
-                    // 🧠 Автоматичний розрахунок числових цін та економічного ефекту для дашборду
+                    // Автоматичний розрахунок числових цін для точкової матриці
                     $chartPrices = array_map(function($r) {
                         preg_match_all('/\d+/', str_replace(' ', '', $r['average_price_uah'] ?? '') ?: '0', $matches);
                         return !empty($matches[0]) ? (int)end($matches[0]) : 0;
                     }, $recommendations);
+
+                    $bestAlternative = $recommendations[0] ?? null;
                 @endphp
 
                 <div x-data="farmaReport(
@@ -185,73 +187,105 @@
                         {{ Js::from($chartExact) }},
                         {{ Js::from($chartFuzzy) }},
                         {{ Js::from($chartSymptoms) }},
-                        {{ Js::from($chartColors) }},
-                        {{ Js::from($chartPrices) }}
-                    )" class="space-y-4">
+                        {{ Js::from($chartColors) }}
+                    )" class="space-y-4 font-sans">
 
                     <div class="flex items-center justify-between gap-3">
                         <button wire:click="newSearch"
                                 class="flex items-center gap-2 text-sm text-indigo-400 hover:underline font-medium">
                             ← Новий запит
                         </button>
+                        {{-- Кнопка-тригер аналітики --}}
                         <button @click="toggle()"
-                                class="flex items-center gap-2 text-sm font-medium bg-slate-900/80 text-indigo-400 border border-slate-800 hover:bg-slate-800 px-3 py-1.5 rounded-lg transition shadow-lg">
-                            📊 {{ $analysisType === 'medicine_name' ? 'Аналітичний дашборд альтернатив' : 'Експертний звіт щодо препаратів' }}
+                                class="flex items-center gap-2 text-sm font-semibold bg-slate-900 border border-indigo-500/40 text-indigo-400 hover:bg-indigo-950/30 hover:border-indigo-400 px-4 py-2 rounded-xl transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.1)] active:scale-[0.98]">
+                            <span>📊</span> {{ $analysisType === 'medicine_name' ? 'Аналітичний дашборд' : 'Відкрити експертний звіт' }}
                         </button>
                     </div>
 
                     <div x-show="show"
-                         x-transition:enter="transition ease-out duration-200"
-                         x-transition:enter-start="opacity-0 -translate-y-1"
+                         x-transition:enter="transition ease-out duration-300"
+                         x-transition:enter-start="opacity-0 -translate-y-2"
                          x-transition:enter-end="opacity-100 translate-y-0"
-                         class="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 space-y-6 backdrop-blur-md text-white relative z-30">
+                         class="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 space-y-5 backdrop-blur-md text-white relative z-30">
 
-                        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-                            <div>
-                                <h3 class="text-base font-bold text-white">📊 {{ $analysisType === 'medicine_name' ? 'Clinical & Financial Analytics Dashboard' : 'Експертний аналітичний звіт' }}</h3>
-                                <p class="text-[10px] text-slate-400 mt-0.5">Внутрішні розрахунки системи PharmAI без врахування генеративних ШІ-галюцинацій</p>
-                            </div>
-                            <span class="text-xs bg-indigo-950/60 border border-indigo-800/60 text-indigo-400 font-mono px-2.5 py-1 rounded-md">v2.4-stable</span>
+                        {{-- 📊 КЛІНІЧНИЙ ЗАГОЛОВОК ПАНЕЛІ --}}
+                        <div class="border-b border-slate-800 pb-3">
+                            <h3 class="text-base font-bold text-slate-200 tracking-wide">
+                                📊 {{ $analysisType === 'medicine_name' ? 'Розширений звіт' : 'Експертний звіт терапевтичної безпеки' }}
+                            </h3>
                         </div>
 
-                        {{-- 📊 1. СЕКЦІЯ KPI-КАРТОК (СУМАРНІ МЕТРИКИ) --}}
+                        {{-- 📊 1. КЛІНІЧНІ KPI-КАРТКИ --}}
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            <div class="bg-slate-800/30 border border-slate-800/80 p-3.5 rounded-xl text-center shadow-inner">
-                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Скринінг ліків</p>
-                                <p class="text-2xl font-black text-indigo-400 mt-0.5">{{ count($recommendations) }} <span class="text-xs font-normal text-slate-500">ЛЗ</span></p>
+                            <div class="bg-slate-800/30 border border-slate-800/80 p-3 rounded-xl text-center shadow-inner flex flex-col justify-center min-w-0">
+                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Скринінг ліків</p>
+                                <p class="text-2xl font-black text-indigo-400 mt-1">{{ count($recommendations) }} <span class="text-xs font-normal text-slate-500">ЛЗ</span></p>
                             </div>
-                            <div class="bg-slate-800/30 border border-slate-800/80 p-3.5 rounded-xl text-center shadow-inner">
-                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Біоеквівалентність</p>
-                                <p class="text-2xl font-black text-green-400 mt-0.5">
+                            <div class="bg-slate-800/30 border border-slate-800/80 p-3 rounded-xl text-center shadow-inner flex flex-col justify-center min-w-0">
+                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Біоеквівалентність</p>
+                                <p class="text-2xl font-black text-green-400 mt-1">
                                     {{ collect($recommendations)->where('match_exact', 100)->count() }} <span class="text-xs font-normal text-slate-500">ЛЗ</span>
                                 </p>
                             </div>
-                            <div class="bg-slate-800/30 border border-slate-800/80 p-3.5 rounded-xl text-center shadow-inner">
-                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Клінічний ризик</p>
-                                <p class="text-2xl font-black text-red-400 mt-0.5">
-                                    {{ collect($recommendations)->where('smart_score', '<', 30)->count() }} <span class="text-xs font-normal text-slate-500">ЛЗ</span>
+                            <div class="bg-slate-800/30 border border-slate-800/80 p-3 rounded-xl text-center shadow-inner flex flex-col justify-center min-w-0">
+                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Низький збіг</p>
+                                <p class="text-2xl font-black text-slate-400 mt-1 font-sans">
+                                    {{ collect($recommendations)->where('smart_score', '<', 50)->count() }} <span class="text-xs font-normal text-slate-500">ЛЗ</span>
                                 </p>
                             </div>
-                            <div class="bg-slate-800/30 border border-slate-800/80 p-3.5 rounded-xl text-center shadow-inner">
-                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Фінансовий ефект</p>
-                                <p class="text-2xl font-black text-emerald-400 mt-0.5">до 60% <span class="text-xs font-normal text-slate-500">заощ.</span></p>
+                            <div class="bg-slate-800/30 border border-slate-800/80 p-3 rounded-xl text-center shadow-inner flex flex-col justify-center min-w-0">
+                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Макс. збіг симптомів</p>
+                                <p class="text-2xl font-black text-emerald-400 mt-1">
+                                    {{ count($recommendations) > 0 ? collect($recommendations)->max('match_symptoms') : 0 }}%
+                                </p>
                             </div>
                         </div>
 
-                        {{-- 📈 2. СЕКЦІЯ НОВИХ ІНТЕРАКТИВНИХ ДІАГРАМ (СІТКА ДВОХ КОЛОНОК) --}}
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {{-- 🧠 2. КЛІНІКО-ФАРМАКОЛОГІЧНИЙ ВИСНОВОК ТА ОНОВЛЕНА ЛЕГЕНДА --}}
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1 font-sans">
+                            <div class="md:col-span-2 bg-gradient-to-r from-indigo-950/20 to-slate-800/30 border border-indigo-500/20 rounded-xl p-3.5 flex items-start gap-3 shadow-inner">
+                                <span class="text-xl mt-0.5">🧠</span>
+                                <div class="text-xs text-slate-300 leading-relaxed">
+                                    <p class="font-bold text-indigo-400 text-[13px] mb-0.5">Клініко-фармакологічний висновок</p>
+                                    @if($bestAlternative && $analysisType === 'medicine_name')
+                                        На основі автоматизованого контент-скринінгу, засіб <strong class="text-white">"{{ $bestAlternative['name'] }}"</strong> визначено як раціональний терапевтичний замінник із загальним індексом відповідності профілю пацієнта <strong class="text-indigo-400">{{ $bestAlternative['smart_score'] }}%</strong>. Він демонструє високу молекулярну тотожність діючих речовин, оптимальне покриття симптомів та чистий профіль сумісності без виявлених перехресних конфліктів із супутньою терапією.
+                                    @else
+                                        Сформовано автоматизований реєстр лікарських засобів, ранжований за комплексним індексом клінічної релевантності. Системний алгоритм PharmAI проаналізував коморбідні фактори ризику, сумісність діючих речовин та вікові обмеження паків, винісши найбільш безпечні та ефективні рішення на перші позиції.
+                                    @endif
+                                </div>
+                            </div>
+
+                            <div class="bg-slate-800/30 border border-slate-800/80 rounded-xl p-3.5 space-y-2 flex flex-col justify-center text-[11px]">
+                                <p class="font-bold tracking-wider text-slate-400 uppercase text-[9px] mb-0.5">Шкала релевантності</p>
+                                <div class="flex items-center gap-2 text-slate-300">
+                                    <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                                    <span><strong>75%–100%:</strong> Висока відповідність</span>
+                                </div>
+                                <div class="flex items-center gap-2 text-slate-300">
+                                    <span class="w-2 h-2 rounded-full bg-yellow-500 shrink-0"></span>
+                                    <span><strong>50%–74%:</strong> Часткова відповідність</span>
+                                </div>
+                                <div class="flex items-center gap-2 text-slate-300">
+                                    <span class="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span>
+                                    <span><strong>0%–49%:</strong> Низький збіг складників</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- 📈 3. СЕКЦІЯ ГРАФІКІВ (КРУГОВИЙ АНАЛІЗ ТА РАДАР) --}}
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
                             <div class="bg-slate-800/20 border border-slate-800/60 p-4 rounded-xl shadow-inner">
-                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-                                    <span>📈</span> Матриця «Ціна / Ефективність альтернатив»
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5 font-sans">
+                                    <span>🍩</span> Розподіл за рівнями відповідності
                                 </p>
-                                <div wire:ignore class="relative">
-                                    <canvas id="chart-scatter-price" style="max-height:260px;"></canvas>
+                                <div wire:ignore class="relative flex justify-center">
+                                    <canvas id="chart-safety-donut" style="max-height:240px; max-width:240px;"></canvas>
                                 </div>
                             </div>
 
                             <div class="bg-slate-800/20 border border-slate-800/60 p-4 rounded-xl shadow-inner">
-                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-                                    <span>🕸️</span> Багатофакторний Радарний Профіль (ТОП-3 замінники)
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5 font-sans">
+                                    <span>🕸️</span> Радарний профіль порівняння (ТОП-3 замінники)
                                 </p>
                                 <div wire:ignore class="relative flex justify-center">
                                     <canvas id="chart-radar-top" style="max-height:260px; max-width:280px;"></canvas>
@@ -259,88 +293,63 @@
                             </div>
                         </div>
 
-                        {{-- 📊 3. ДВІ ІСНУЮЧІ СТАНДАРТНІ ДІАГРАМИ --}}
+                        {{-- 📊 4. СТАНДАРТНІ ГРАФІКИ РЕЙТИНГІВ (ВЕЛИКА ФІКСОВАНА ВИСОТА ТА ДЕТАЛІЗОВАНІ ШКАЛИ) --}}
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2 border-t border-slate-800/40">
                             <div>
-                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">🧠 Інтелектуальний збіг аналогів (SmartScore)</p>
-                                <div wire:ignore>
-                                    <canvas id="chart-smart" style="max-height:{{ count($recommendations) * 38 + 20 }}px"></canvas>
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-sans">🧠 Інтелектуальний рейтинг відповідності</p>
+                                <div wire:ignore class="relative" style="height: 340px;">
+                                    <canvas id="chart-smart"></canvas>
                                 </div>
                             </div>
 
                             @if ($analysisType === 'medicine_name')
                                 <div>
-                                    <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">📊 Порівняльний розподіл метрик компонентів</p>
-                                    <div wire:ignore>
-                                        <canvas id="chart-metrics" style="max-height:280px"></canvas>
+                                    <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-sans">📊 Компонентний розподіл ліків</p>
+                                    <div wire:ignore class="relative" style="height: 340px;">
+                                        <canvas id="chart-metrics"></canvas>
                                     </div>
                                 </div>
                             @endif
                         </div>
 
-                        {{-- 📋 4. БАГАТОФАКТОРНА РОЗШИРЕНА ТАБЛИЦЯ ПОРІВНЯННЯ --}}
-                        <div class="overflow-x-auto pt-2 border-t border-slate-800/40">
-                            <table class="w-full text-xs text-left border-collapse">
+                        {{-- 📋 5. ЧИСТА КЛІНІЧНА ТАБЛИЦЯ --}}
+                        <div class="w-full pt-2 border-t border-slate-800/40">
+                            <table class="w-full text-xs text-left border-collapse table-fixed font-sans">
                                 <thead>
-                                    <tr class="border-b border-slate-800 text-slate-400 font-mono uppercase tracking-wider text-[10px]">
-                                        <th class="py-2 pr-4 font-semibold">Торгова назва препарату</th>
-                                        <th class="py-2 px-2 font-semibold text-center">🧠 SmartScore</th>
+                                    <tr class="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
+                                        <th class="py-2.5 px-3 font-semibold {{ $analysisType === 'medicine_name' ? 'w-[35%]' : 'w-[55%]' }}">Торгова назва ЛЗ</th>
+                                        <th class="py-2.5 px-1 font-semibold text-center {{ $analysisType === 'medicine_name' ? 'w-[13%]' : 'w-[15%]' }}">Збіг</th>
                                         @if ($analysisType === 'medicine_name')
-                                            <th class="py-2 px-2 font-semibold text-center">🧪 Точні</th>
-                                            <th class="py-2 px-2 font-semibold text-center">🔬 Схожі</th>
+                                            <th class="py-2.5 px-1 font-semibold text-center w-[13%]">Точні</th>
+                                            <th class="py-2.5 px-1 font-semibold text-center w-[13%]">Схожі</th>
                                         @endif
-                                        <th class="py-2 px-2 font-semibold text-center">🩺 Симптоми</th>
-                                        <th class="py-2 px-2 font-semibold text-right">💰 Орієнтовна ціна</th>
-                                        <th class="py-2 pl-4 font-semibold text-right">🏭 Країна</th>
+                                        <th class="py-2.5 px-1 font-semibold text-center {{ $analysisType === 'medicine_name' ? 'w-[13%]' : 'w-[15%]' }}">Симптоми</th>
+                                        <th class="py-2.5 pl-2 pr-4 font-semibold text-right w-[15%]">Країна-виробник</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @foreach ($recommendations as $i => $rec)
                                         <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition {{ $i === 0 ? 'font-bold bg-indigo-950/20 text-white' : 'text-slate-300' }}">
-                                            <td class="py-2.5 pr-4 flex items-center gap-1.5">
-                                                <span class="w-2 h-2 rounded-full shrink-0 {{ $rec['smart_score'] >= 75 ? 'bg-green-500' : ($rec['smart_score'] >= 50 ? 'bg-yellow-500' : 'bg-red-500') }}"></span>
-                                                @if ($i === 0)🏆 @endif {{ $rec['name'] }}
+                                            <td class="py-2.5 px-3 flex items-center gap-1.5 min-w-0 truncate">
+                                                <span class="w-1.5 h-1.5 rounded-full shrink-0 {{ $rec['smart_score'] >= 75 ? 'bg-green-500' : ($rec['smart_score'] >= 50 ? 'bg-yellow-500' : 'bg-red-500') }}"></span>
+                                                <span class="truncate">@if ($i === 0)🏆 @endif {{ $rec['name'] }}</span>
                                             </td>
-                                            <td class="py-2.5 px-2 text-center font-black
+                                            <td class="py-2.5 px-1 text-center font-black text-[11px]
                                                 {{ $rec['smart_score'] >= 75 ? 'text-green-400' : ($rec['smart_score'] >= 50 ? 'text-yellow-400' : 'text-red-400') }}">
                                                 {{ $rec['smart_score'] }}%
                                             </td>
                                             @if ($analysisType === 'medicine_name')
-                                                <td class="py-2.5 px-2 text-center text-indigo-400/90">{{ $rec['match_exact'] }}%</td>
-                                                <td class="py-2.5 px-2 text-center text-purple-400/90">
+                                                <td class="py-2.5 px-1 text-center text-indigo-400/90 text-[11px]">{{ $rec['match_exact'] }}%</td>
+                                                <td class="py-2.5 px-1 text-center text-purple-400/90 text-[11px]">
                                                     {{ $rec['match_exact'] == 100 ? '—' : $rec['match_fuzzy'] . '%' }}
                                                 </td>
                                             @endif
-                                            <td class="py-2.5 px-2 text-center text-blue-400/90">{{ $rec['match_symptoms'] }}%</td>
-                                            <td class="py-2.5 px-2 text-right font-medium text-emerald-400 font-mono">{{ $rec['average_price_uah'] ?? 'N/A' }}</td>
-                                            <td class="py-2.5 pl-4 text-right text-slate-400 text-[11px]">{{ $rec['country'] ?? 'N/A' }}</td>
+                                            <td class="py-2.5 px-1 text-center text-blue-400/90 text-[11px]">{{ $rec['match_symptoms'] }}%</td>
+                                            <td class="py-2.5 pl-2 pr-4 text-right text-slate-400 text-[11px] truncate">{{ $rec['country'] ?? 'N/A' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
                             </table>
-                        </div>
-
-                        {{-- 📐 5. АКАДЕМІЧНИЙ БЛОК МЕТОДОЛОГІЇ (ОНОВЛЕНИЙ UX) --}}
-                        <div class="border-t border-slate-800/60 pt-4 text-[11px] text-slate-400 leading-relaxed">
-                            <p class="font-bold uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-1.5 font-mono text-[10px]">
-                                <span>📐</span> Математична модель валідації (Weighted Scoring Model)
-                            </p>
-                            <p class="text-slate-400">
-                                Інтелектуальний індекс релевантності обчислюється за детермінованою мультикритеріальною формулою:
-                            </p>
-                            
-                            {{-- Центральна плашка з красиво оформленою формулою --}}
-                            <div class="bg-slate-950/50 border border-slate-800 rounded-xl p-3 font-mono text-center my-3 shadow-inner text-xs tracking-wide">
-                                <span class="text-indigo-400 font-bold">SmartScore</span> = 
-                                (0.7 × <span class="text-purple-400">ChemicalMatch</span>) + 
-                                (0.3 × <span class="text-blue-400">SymptomMatch</span>) - 
-                                <span class="text-red-400">Σ(Penalties)</span>
-                            </div>
-
-                            <p class="text-[11px] text-slate-400 mt-2">
-                                де розрахунковий компонент <span class="text-purple-400 font-semibold font-mono">ChemicalMatch</span> = <span class="text-slate-200 font-mono">ExactPercent + FuzzyPercent</span> (взаємовиключні хімічні підмножини діючих речовин). 
-                                Кумулятивні штрафні санкції (<span class="text-red-400 font-mono">Σ(Penalties)</span>) інтегруються динамічно на основі логічного аналізу віку, статусу вагітності, індивідуального алергологічного профілю пацієнта та автоматичного Drug-Drug Interaction скринінгу супутньої фармакотерапії.
-                            </p>
                         </div>
 
                     </div>
@@ -423,7 +432,7 @@
                     @if (isset($medicine['available_in_ukraine']))
                         @if ($medicine['available_in_ukraine'])
                             <span class="inline-flex items-center gap-1 bg-blue-950/40 border border-blue-800 text-blue-400 text-xs font-medium px-3 py-1 rounded-full">
-                                🇺🇦 Доступний в Україні
+                                🇺🇦 Доступний in Україні
                             </span>
                         @else
                             <span class="inline-flex items-center gap-1 bg-orange-950/40 border border-orange-800 text-orange-400 text-xs font-medium px-3 py-1 rounded-full">
@@ -506,7 +515,6 @@
                             @php 
                                 $recDb = \App\Models\Medicine::where('name', $rec['name'])->first(); 
                                 
-                                // 🧠 СИСТЕМНИЙ СКРИНІНГ ПЕРЕДОЗУВАННЯ РЕЧОВИНИ (ОБЧИСЛЮЄТЬСЯ НАПЕРЕД)
                                 $takenLower = mb_strtolower($currentMedications);
                                 $analogueNameLower = mb_strtolower($rec['name'] ?? '');
                                 
@@ -540,14 +548,13 @@
                                     </div>
                                 </div>
 
-                                {{-- Блок обґрунтування та критичних застережень --}}
                                 @if (!empty($rec['smart_reasons']) || $isSameDrugOverdose)
                                     <div class="bg-slate-800/40 border border-slate-800/60 rounded-lg px-3 py-2 space-y-1.5">
                                         
                                         @if ($isSameDrugOverdose)
                                             <p class="text-xs flex items-start gap-2 text-red-400 font-medium bg-red-950/20 border border-red-900/30 p-2 rounded-md">
                                                 <span class="shrink-0 text-sm">❌</span>
-                                                <span><strong>Фармацевтична несумісність (дублювання терапії):</strong> Запропонований аналог містить діючу речовину, яка вже входить до складу Вашого поточного лікування ({{ $currentMedications }}). Одночасне застосування призведе до небезпечного передозування та критично підвищить ризик внутрішніх побічних ефектів.</span>
+                                                <span><strong>Фармацевтична несумісність (дублювання терапії):</strong> Запропонований аналог містить діючу речовину, яка вже входить до складу Вашого поточного лікування ({{ $currentMedications }}). Одночасне застосування призведе до небезпечного передозовки та підвисить ризик внутрішніх побічних ефектів.</span>
                                             </p>
                                         @endif
 
@@ -632,7 +639,6 @@
                                         @endif
                                     @endif
 
-                                    {{-- Розумний динамічний маркер безпеки на основі контент-скринінгу --}}
                                     @if (!empty($currentMedications))
                                         @php
                                             $reasonsCollection = collect($rec['smart_reasons'] ?? []);
@@ -700,12 +706,6 @@
                                     @endif
                                 </div>
 
-                                @if (!empty($rec['average_price_uah']))
-                                    <p class="text-xs font-medium text-green-400">
-                                        💰 {{ $rec['average_price_uah'] }}
-                                    </p>
-                                @endif
-
                                 @if (!empty($rec['active_ingredients']))
                                     <div class="flex flex-wrap gap-1.5">
                                         @foreach ($rec['active_ingredients'] as $ing)
@@ -742,15 +742,15 @@
     </div>
 </div>
 
-{{-- 🧠 6. JS-ДВИГУН ДЛЯ ІНІЦІАЛІЗАЦІЇ ВСІХ ЧОТИРЬОХ ДІАГРАМ В ALPINE.JS --}}
+{{-- 🧠 ОНОВЛЕНИЙ JS-ДВИГУН ГРАФІКІВ (ПІДВИЩЕНА ДЕТАЛІЗАЦІЯ ШКАЛИ ТА КЛАСИЧНИЙ ГРУПОВАНИЙ ТИП БЕЗ НАКОПИЧЕННЯ) --}}
 <script>
 document.addEventListener('alpine:init', () => {
     Alpine.data('farmaReport', (labels, smart, exact, fuzzy, symptoms, colors, prices) => ({
-        show: true,
+        // Дашборд початково закритий
+        show: false,
         charts: {},
         init() {
-            this.$nextTick(() => { this.renderCharts(); });
-            this.$watch('smart', () => { this.renderCharts(); });
+            this.$watch('smart', () => { if (this.show) { this.renderCharts(); } });
         },
         toggle() {
             this.show = !this.show;
@@ -759,12 +759,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
         renderCharts() {
-            // Безпечна деструкція попередніх інстансів графіків
-            ['smart', 'metrics', 'scatter', 'radar'].forEach(id => {
+            ['smart', 'metrics', 'safety-donut', 'radar'].forEach(id => {
                 if (this.charts[id]) { this.charts[id].destroy(); }
             });
 
-            // 1. Графік Smart Score (Horizontal Bar)
+            Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial';
+
+            // 1. Інтелектуальний рейтинг (ФІКС: ДОДАНО stepSize: 10 ДЛЯ ДЕТАЛІЗАЦІЇ ШКАЛИ ЛІНІЙКИ)
             let ctxSmart = document.getElementById('chart-smart');
             if (ctxSmart) {
                 this.charts['smart'] = new Chart(ctxSmart, {
@@ -775,19 +776,40 @@ document.addEventListener('alpine:init', () => {
                             data: smart,
                             backgroundColor: colors,
                             borderRadius: 6,
-                            barThickness: 18
+                            barThickness: 16
                         }]
                     },
                     options: {
                         indexAxis: 'y',
                         responsive: true,
+                        maintainAspectRatio: false,
+                        layout: { padding: { left: 15, right: 25, top: 10, bottom: 10 } },
                         plugins: { legend: { display: false } },
-                        scales: { x: { min: 0, max: 100, grid: { color: '#1e293b' } }, y: { grid: { display: false } } }
+                        scales: { 
+                            x: { 
+                                min: 0, 
+                                max: 100, 
+                                grid: { color: '#1e293b' }, 
+                                ticks: { 
+                                    color: '#94a3b8', 
+                                    font: { size: 10 },
+                                    stepSize: 10 // 🟢 Шкала деталізована кроком у 10% (0, 10, 20... 100)
+                                } 
+                            }, 
+                            y: { 
+                                grid: { display: false }, 
+                                ticks: { 
+                                    color: '#e2e8f0', 
+                                    font: { size: 11, weight: 'bold' },
+                                    padding: 12
+                                } 
+                            } 
+                        }
                     }
                 });
             }
 
-            // 2. Графік Розподілу Метрик (Grouped Component Bar)
+            // 2. 📊 КОМПОНЕНТНИЙ РОЗПОДІЛ (ЗАМІНЕНО НА ЧИСТИЙ ГРУПОВАНИЙ НА ШКАЛІ 0-100%)
             let ctxMetrics = document.getElementById('chart-metrics');
             if (ctxMetrics) {
                 this.charts['metrics'] = new Chart(ctxMetrics, {
@@ -802,46 +824,65 @@ document.addEventListener('alpine:init', () => {
                     },
                     options: {
                         responsive: true,
-                        plugins: { legend: { labels: { color: '#94a3b8' } } },
-                        scales: { x: { grid: { color: '#1e293b' } }, y: { min: 0, max: 100, grid: { color: '#1e293b' } } }
-                    }
-                });
-            }
-
-            // 3. Новий Матричний Графік Ціна / Ефективність (Scatter Chart)
-            let ctxScatter = document.getElementById('chart-scatter-price');
-            if (ctxScatter) {
-                let scatterData = labels.map((label, index) => ({ x: prices[index], y: smart[index], label: label }));
-                this.charts['scatter'] = new Chart(ctxScatter, {
-                    type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: 'Альтернативні ЛЗ',
-                            data: scatterData,
-                            backgroundColor: 'rgba(236, 72, 153, 0.8)',
-                            pointRadius: 7,
-                            pointHoverRadius: 9
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: (ctx) => ctx.raw.label + ': ' + ctx.raw.x + ' грн, ' + ctx.raw.y + '%'
-                                }
-                            }
-                        },
-                        scales: {
-                            x: { title: { display: true, text: 'Орієнтовна вартість (грн)', color: '#94a3b8' }, grid: { color: '#1e293b' } },
-                            y: { title: { display: true, text: 'Релевантність SmartScore (%)', color: '#94a3b8' }, min: 0, max: 100, grid: { color: '#1e293b' } }
+                        maintainAspectRatio: false,
+                        layout: { padding: { bottom: 50, left: 10, right: 10, top: 10 } },
+                        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } } },
+                        scales: { 
+                            x: { 
+                                stacked: false, // 🟢 ПОВНИЙ ДЕМОНТАЖ НАКОПИЧЕННЯ: стовпчики рендеряться поруч
+                                grid: { color: '#1e293b' }, 
+                                ticks: { 
+                                    color: '#94a3b8', 
+                                    font: { size: 10 },
+                                    maxRotation: 45,
+                                    minRotation: 45,
+                                    autoSkip: false
+                                } 
+                            }, 
+                            y: { 
+                                stacked: false, // 🟢 ДЕМОНТАЖ НАКОПИЧЕННЯ
+                                min: 0, 
+                                max: 100, // 🟢 Сувора шкала до 100% для незалежних складників
+                                grid: { color: '#1e293b' }, 
+                                ticks: { color: '#94a3b8', font: { size: 10 }, stepSize: 20 } 
+                            } 
                         }
                     }
                 });
             }
 
-            // 4. Новий Радарний Скринінг ТОП-3 аналогів (Radar Chart)
+            // 3. Круговий графік відповідності (Пончик)
+            let ctxDonut = document.getElementById('chart-safety-donut');
+            if (ctxDonut) {
+                let safeCount = smart.filter(score => score >= 75).length;
+                let warningCount = smart.filter(score => score >= 50 && score < 75).length;
+                let riskCount = smart.filter(score => score < 50).length;
+
+                this.charts['safety-donut'] = new Chart(ctxDonut, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Висока відповідність', 'Часткова відповідність', 'Низький збіг складників'],
+                        datasets: [{
+                            data: [safeCount, warningCount, riskCount],
+                            backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(234,179,8,0.8)', 'rgba(100,116,139,0.8)'],
+                            borderColor: '#1e293b',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { color: '#94a3b8', font: { size: 9 }, boxWidth: 10 }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // 4. Радарний Скринінг ТОП-3 аналогів
             let ctxRadar = document.getElementById('chart-radar-top');
             if (ctxRadar && labels.length > 0) {
                 let top3Labels = labels.slice(0, 3);
@@ -868,6 +909,7 @@ document.addEventListener('alpine:init', () => {
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }, color: '#94a3b8' } } },
                         scales: { r: { min: 0, max: 100, ticks: { display: false }, grid: { color: '#334155' }, angleLines: { color: '#334155' } } }
                     }

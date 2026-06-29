@@ -70,217 +70,220 @@ class AnalyzeForm extends Component
 
     public function submit(): void
     {
-        $this->validate();
-
+        $this->validate(); //
         set_time_limit(180); // Gemini може відповідати довго
 
-        $this->state = 'loading';
-        $this->result = null;
-        $this->errorMessage = null;
-        $this->validationWarning = null;
+        $this->query = trim($this->query);
+        if (!empty($this->query)) {
+            $this->query = mb_strtoupper(mb_substr($this->query, 0, 1, 'UTF-8'), 'UTF-8') . mb_substr($this->query, 1, null, 'UTF-8');
+        }
+
+        $this->state = 'loading'; // 
+        $this->result = null; // 
+        $this->errorMessage = null; // 
+        $this->validationWarning = null; // 
 
         try {
-            // Валідація типу введених даних
-            $gemini = app(\App\Services\AI\GeminiService::class);
+            // Нормалізуємо запит для точного регістронезалежного аналізу
+            $cleanQuery = trim($this->query);
+            $lowerQuery = mb_strtolower($cleanQuery);
+
+            $gemini = app(\App\Services\AI\GeminiService::class); 
             
-            if ($this->analysisType === 'medicine_name') {
-                // Перевіряємо, що введено назву препарату, а не симптоми
-                if (!$gemini->isMedicineName($this->query)) {
+            if ($this->analysisType === 'medicine_name') { 
+                
+                            $drugExistsInDb = \App\Models\Medicine::whereRaw('LOWER(name) LIKE ?', ['%' . $lowerQuery . '%'])->exists();
+
+                // Якщо препарату немає в БД, тільки тоді верифікуємо його назву через Gemini
+                if (!$drugExistsInDb && !$gemini->isMedicineName($cleanQuery)) { 
                     $this->validationWarning = 'Ви вказали симптоми або опис замість назви препарату. Якщо хочете знайти препарат за симптомами, оберіть відповідний тип аналізу у випадаючому списку.';
-                    $this->state = 'validation_error';
-                    return;
+                    $this->state = 'validation_error'; // [cite: 19]
+                    return; // [cite: 19]
                 }
-            } elseif ($this->analysisType === 'symptoms') {
+                
+            } elseif ($this->analysisType === 'symptoms') { // 
                 // Перевіряємо, що введено симптоми, а не назву препарату
-                if ($gemini->isMedicineName($this->query)) {
-                    $this->validationWarning = 'Ви вказали назву препарату замість опису симптомів. Якщо хочете знайти препарат за назвою, оберіть відповідний тип аналізу у випадаючому списку.';
-                    $this->state = 'validation_error_medicine';
-                    return;
+                if ($gemini->isMedicineName($cleanQuery)) { // 
+                    $this->validationWarning = 'Ви вказали назву препарату замість опису симптомів. Якщо хочете знайти препарат за назвою, оберіть відповідний тип аналізу у випадаючому списку.'; 
+                    $this->state = 'validation_error_medicine'; // 
+                    return; 
                 }
             }
 
-            $details  = app(MedicineDetailsService::class);
+            $details  = app(MedicineDetailsService::class); 
             $analyzer = app(MedicineAnalyzeService::class);
 
-            if ($this->analysisType === 'medicine_name') {
+            if ($this->analysisType === 'medicine_name') { 
                 // ЗАПИТ 1 — Деталі препарату (назва, симптоми, діючі речовини)
                 $medicine = $details->getMedicineDetails($this->query);
-
                 // ЗАПИТ 2 — Пошук аналогів за симптомами
-                $recommendations = $details->getRecommendationsBySymptoms(
-                    $medicine['symptoms'],
-                    $medicine['name']
-                );
-
+                $recommendations = $details->getRecommendationsBySymptoms( 
+                    $medicine['symptoms'], 
+                    $medicine['name'] 
+                ); 
                 // Зберігаємо повні дані в БД (для майбутнього локального пошуку)
-                $details->saveMedicine($medicine);
-                foreach ($recommendations as $rec) {
-                    $details->saveMedicine($rec);
-                }
+                $details->saveMedicine($medicine); 
+                foreach ($recommendations as $rec) { 
+                    $details->saveMedicine($rec); 
+                } 
 
                 // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
-                $patientContext = [
-                    'age'               => $this->age,
-                    'is_pregnant'       => $this->isPregnant,
-                    'contraindications' => $this->contraindications,
-                    'current_medications' => $this->currentMedications,
-                ];
-
+                $patientContext = [ 
+                    'age'               => $this->age, 
+                    'is_pregnant'       => $this->isPregnant,  
+                    'contraindications' => $this->contraindications, 
+                    'current_medications' => $this->currentMedications, 
+                ]; 
                 // Шукаємо додаткові аналоги в локальній БД за діючими речовинами
                 // (вирішує проблему асиметрії: Піколакс ↔ Слабілакс і навпаки)
-                $aiFoundNames = array_column($recommendations, 'name');
-                $localAnalogues = $details->findLocalAnalogues(
-                    $medicine['active_ingredients'] ?? [],
-                    $medicine['name'],
-                    $aiFoundNames
-                );
-
-                // Об'єднуємо AI-аналоги і локальні (локальні додаються в кінець перед аналізом)
-                $allRecommendations = array_merge($recommendations, $localAnalogues);
-
+                $aiFoundNames = array_column($recommendations, 'name'); 
+                $localAnalogues = $details->findLocalAnalogues( 
+                    $medicine['active_ingredients'] ?? [], 
+                    $medicine['name'], 
+                    $aiFoundNames 
+                ); 
+                // Об'єднуємо AI-аналоги і локальні (локальні додаються в кінець перед анаізом)
+                $allRecommendations = array_merge($recommendations, $localAnalogues); 
                 // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
-                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType);
-
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType); 
                 // Для основного препарату — перевіряємо обмеження через той самий сервіс
-                $medicine['age_allowed']             = $analyzer->checkAgeAllowed($medicine['min_age'] ?? '', $this->age);
-                $medicine['contraindication_matches'] = $analyzer->checkContraindications($medicine['contraindications'] ?? [], $this->contraindications);
+                $medicine['age_allowed']             = $analyzer->checkAgeAllowed($medicine['min_age'] ?? '', $this->age); 
+                $medicine['contraindication_matches'] = $analyzer->checkContraindications($medicine['contraindications'] ?? [], $this->contraindications); 
 
                 // =========================================================================
-                // 🧠 1. ІНТЕЛЕКТУАЛЬНА ФІЛЬТРАЦІЯ ОДДРУКІВ ТА ВНУТРІШНІХ ДУБЛІВ ЛІКІВ
+                // 🧠 ІНТЕЛЕКТУАЛЬНА ФІЛЬТРАЦІЯ ОДДРУКІВ ТА ВНУТРІШНІХ ДУБЛІВ ЛІКІВ
                 // =========================================================================
-                $normalizeWord = function ($text) {
-                    if (!$text) return '';
-                    $firstWord = explode(' ', trim(mb_strtolower($text)))[0];
-                    $firstWord = preg_replace('/[^\p{L}\p{N}]/u', '', $firstWord);
+                $normalizeWord = function ($text) { 
+                    if (!$text) return ''; 
+                    $firstWord = explode(' ', trim(mb_strtolower($text)))[0]; 
+                    $firstWord = preg_replace('/[^\p{L}\p{N}]/u', '', $firstWord); 
                     
-                    $cyr = ['а','б','в','г','д','е','є','ж','з','и','і','ї','й','к','л','м','н','о','п','р','с','т','у','ф','х','ц','ч','ш','щ','ь','ю','я'];
-                    $lat = ['a','b','v','h','d','e','ye','zh','z','y','i','yi','y','k','l','m','n','o','p','r','s','t','u','f','kh','ts','ch','sh','shch','','yu','ya'];
-                    $result = str_replace($cyr, $lat, $firstWord);
+                    $cyr = ['а','б','в','г','д','е','є','ж','з','и','і','ї','й','к','л','м','н','о','п','р','с','т','у','ф','х','ц','ч','ш','щ','ь','ю','я']; 
+                    $lat = ['a','b','v','h','d','e','ye','zh','z','y','i','yi','y','k','l','m','n','o','p','r','s','t','u','f','kh','ts','ch','sh','shch','','yu','ya']; 
+                    $result = str_replace($cyr, $lat, $firstWord); 
                     
                     // Уніфікуємо схожі латинські фонеми (c/k, g/h) для склеювання крос-мовних дублів
-                    return str_replace(['k', 'h', 'y', 'c', 'x'], ['c', 'g', 'i', 's', 'kh'], $result);
-                };
+                    return str_replace(['k', 'h', 'y', 'c', 'x'], ['c', 'g', 'i', 's', 'kh'], $result); 
+                }; 
 
-                $mainNormalized = $normalizeWord($medicine['name'] ?? '');
+                $mainNormalized = $normalizeWord($medicine['name'] ?? ''); 
 
                 // Етап А: Фільтруємо аналоги щодо головного препарату
-                $filtered = array_filter($filtered, function($rec) use ($mainNormalized, $normalizeWord) {
-                    $recNormalized = $normalizeWord($rec['name'] ?? '');
-                    if (empty($recNormalized) || empty($mainNormalized)) return true;
-                    return levenshtein($mainNormalized, $recNormalized) > 2;
-                });
-
+                $filtered = array_filter($filtered, function($rec) use ($mainNormalized, $normalizeWord) { 
+                    $recNormalized = $normalizeWord($rec['name'] ?? ''); 
+                    if (empty($recNormalized) || empty($mainNormalized)) return true; 
+                    return levenshtein($mainNormalized, $recNormalized) > 2; 
+                }); 
                 // Етап Б: Видаляємо дублікати МІЖ самими аналогами (напр. Кардіомагніл та Cardiomagnyl)
-                $seenAnalogs = [];
-                $filtered = array_filter($filtered, function($rec) use ($normalizeWord, &$seenAnalogs) {
-                    $recNormalized = $normalizeWord($rec['name'] ?? '');
-                    foreach ($seenAnalogs as $seen) {
-                        if (levenshtein($seen, $recNormalized) <= 2) {
-                            return false; 
+                $seenAnalogs = []; 
+                $filtered = array_filter($filtered, function($rec) use ($normalizeWord, &$seenAnalogs) { 
+                    $recNormalized = $normalizeWord($rec['name'] ?? ''); 
+                    foreach ($seenAnalogs as $seen) { 
+                        if (levenshtein($seen, $recNormalized) <= 2) { 
+                            return false;  
                         }
-                    }
-                    $seenAnalogs[] = $recNormalized;
-                    return true;
-                });
-                $filtered = array_values($filtered);
+                    } 
+                    $seenAnalogs[] = $recNormalized; 
+                    return true; 
+                }); 
+                $filtered = array_values($filtered); 
 
                 // =========================================================================
-                // 🧠 2. АВТОМАТИЧНЕ ВИЯВЛЕННЯ КОНФЛІКТІВ ДЛЯ ГОЛОВНОГО ПРЕПАРАТУ
+                // 🧠 АВТОМАТИЧНЕ ВИЯВЛЕННЯ КОНФЛІКТІВ ДЛЯ ГОЛОВНОГО ПРЕПАРАТУ
                 // =========================================================================
-                $medicine['interaction_matches'] = [];
-                $medicine['interaction_details'] = [];
+                $medicine['interaction_matches'] = []; 
+                $medicine['interaction_details'] = []; 
 
                 if (!empty($this->currentMedications)) {
-                    foreach ($filtered as $rec) {
-                        if (($rec['match_exact'] ?? 0) == 100) {
+                    foreach ($filtered as $rec) { 
+                        if (($rec['match_exact'] ?? 0) == 100) { 
                             foreach ($rec['smart_reasons'] ?? [] as $reason) {
                                 $textLower = mb_strtolower($reason['text'] ?? '');
                                 if (str_contains($textLower, 'взаємоді') || str_contains($textLower, 'несумісн') || str_contains($textLower, 'конфлікт') || str_contains($textLower, 'подвоєн')) {
-                                    $medicine['interaction_matches'][] = $this->currentMedications;
-                                    
-                                    // Очищаємо назву аналога та його латинські/кириличні синоніми всередині речення
-                                    $analogFirstWord = explode(' ', trim($rec['name']))[0];
-                                    $cleanText = str_ireplace($analogFirstWord, $medicine['name'], $reason['text']);
-                                    
-                                    $synonymsMap = [
-                                        'cardiomagnyl' => 'Кардіомагніл', 'кардіомагніл' => 'Cardiomagnyl',
-                                        'enap' => 'Енап', 'енап' => 'Enap', 'nimesil' => 'Німесил', 'німесил' => 'Nimesil'
-                                    ];
-                                    $analogFirstWordLower = mb_strtolower($analogFirstWord);
-                                    if (isset($synonymsMap[$analogFirstWordLower])) {
-                                        $cleanText = str_ireplace($synonymsMap[$analogFirstWordLower], $medicine['name'], $cleanText);
+                            
+                                    // 🛡️ ЗАПОБІЖНИК: Якщо фраза містить заперечення конфлікту, ігноруємо її
+                                    if (str_contains($textLower, 'не виявлено') || str_contains($textLower, 'відсутн') || str_contains($textLower, 'не знайдено') || str_contains($textLower, 'немає')) {
+                                        continue;
                                     }
+
+                                    $medicine['interaction_matches'][] = $this->currentMedications;
+
+                                    // Очищаємо назву аналога та його латинські/кириличні синоніми всередині речення
+                                    $analogFirstWord = explode(' ', trim($rec['name']))[0]; 
+                                    $cleanText = str_ireplace($analogFirstWord, $medicine['name'], $reason['text']); 
                                     
-                                    $medicine['interaction_details'][] = $cleanText;
-                                }
+                                    $synonymsMap = [ 
+                                        'cardiomagnyl' => 'Кардіомагніл', 'кардіомагніл' => 'Cardiomagnyl', 
+                                        'enap' => 'Енап', 'енап' => 'Enap', 'nimesil' => 'Німесил', 'німесил' => 'Nimesil'
+                                    ]; 
+                                    $analogFirstWordLower = mb_strtolower($analogFirstWord); 
+                                    if (isset($synonymsMap[$analogFirstWordLower])) { 
+                                        $cleanText = str_ireplace($synonymsMap[$analogFirstWordLower], $medicine['name'], $cleanText); 
+                                    } 
+                                    
+                                    $medicine['interaction_details'][] = $cleanText; 
+                                } 
                             }
                         }
-                    }
-                    $medicine['interaction_matches'] = array_values(array_unique($medicine['interaction_matches']));
-                    $medicine['interaction_details'] = array_values(array_unique($medicine['interaction_details']));
+                    } 
+                    $medicine['interaction_matches'] = array_values(array_unique($medicine['interaction_matches'])); 
+                    $medicine['interaction_details'] = array_values(array_unique($medicine['interaction_details'])); 
                 }
                 // =========================================================================
 
-                $this->result = [
-                    'medicine'        => $medicine,
-                    'recommendations' => $filtered,
-                ];
-            } elseif ($this->analysisType === 'symptoms') {
-                // ЗАПИТ 1 — Пошук аналогів за симптомами
-                $recommendations = $details->getRecommendationsBySymptoms(
-                    $this->query,
+                $this->result = [ 
+                    'medicine'        => $medicine, 
+                    'recommendations' => $filtered, 
+                ]; 
+            } elseif ($this->analysisType === 'symptoms') { 
+                // Пошук аналогів за симптомами
+                $recommendations = $details->getRecommendationsBySymptoms( 
+                    $this->query, 
                     '' // Немає основного препарату для виключення
-                );
-
+                ); 
                 // Створюємо фіктивний препарат для аналізу
-                $medicine = [
-                    'name'               => $this->query,
-                    'symptoms'           => $this->query,
-                    'active_ingredients' => [],
-                    'min_age'            => '',
-                    'contraindications'  => [],
-                ];
-
+                $medicine = [ 
+                    'name'               => $this->query, 
+                    'symptoms'           => $this->query, 
+                    'active_ingredients' => [], 
+                    'min_age'            => '', 
+                    'contraindications'  => [], 
+                ]; 
                 // Зберігаємо повні дані в БД (для майбутнього локального пошуку)
-                foreach ($recommendations as $rec) {
-                    $details->saveMedicine($rec);
-                }
+                foreach ($recommendations as $rec) { 
+                    $details->saveMedicine($rec); 
+                } 
 
                 // Контекст пацієнта — передається в аналізатор для інтелектуального скорингу
-                $patientContext = [
-                    'age'               => $this->age,
-                    'is_pregnant'       => $this->isPregnant,
-                    'contraindications' => $this->contraindications,
-                    'current_medications' => $this->currentMedications,
-                ];
-
+                $patientContext = [ 
+                    'age'               => $this->age, 
+                    'is_pregnant'       => $this->isPregnant, 
+                    'contraindications' => $this->contraindications, 
+                    'current_medications' => $this->currentMedications, 
+                ]; 
                 // Шукаємо додаткові аналоги в локальній БД за діючими речовинами
-                // (вирішує проблему асиметрії: Піколакс ↔ Слабілакс і навпаки)
-                $aiFoundNames = array_column($recommendations, 'name');
-                $localAnalogues = $details->findLocalAnalogues(
-                    [], // Немає діючих речовин для пошуку локальних аналогів
-                    '', // Немає основного препарату для виключення
-                    $aiFoundNames
-                );
-
+                $aiFoundNames = array_column($recommendations, 'name'); 
+                $localAnalogues = $details->findLocalAnalogues( 
+                    [], // Немає діючих речовин для пошуку локальних аналогів 
+                    '', // Немає основного препарату для виключення 
+                    $aiFoundNames 
+                ); 
                 // Об'єднуємо AI-аналоги і локальні (локальні додаються в кінець перед аналізом)
-                $allRecommendations = array_merge($recommendations, $localAnalogues);
-
+                $allRecommendations = array_merge($recommendations, $localAnalogues); 
                 // Повний аналіз: хімічна/симптоматична схожість + smart_score з урахуванням обмежень пацієнта
-                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType);
+                $filtered = $analyzer->analyze($allRecommendations, $medicine, $patientContext, $this->analysisType); 
+                $this->result = [ 
+                    'medicine'        => $medicine, 
+                    'recommendations' => $filtered, 
+                ]; 
+            } else { 
+                throw new \RuntimeException('Невідомий тип аналізу.'); 
+            } 
 
-                $this->result = [
-                    'medicine'        => $medicine,
-                    'recommendations' => $filtered,
-                ];
-            } else {
-                throw new \RuntimeException('Невідомий тип аналізу.');
-            }
-
-            $this->state = 'result';
-        } catch (Throwable $e) {
-            $this->errorMessage = $e->getMessage();
-            $this->state = 'error';
+            $this->state = 'result'; 
+        } catch (Throwable $e) { 
+            $this->errorMessage = $e->getMessage(); 
+            $this->state = 'error'; 
         }
     }
 
