@@ -209,17 +209,22 @@ class AnalyzeForm extends Component
                                     $medicine['interaction_matches'][] = $this->currentMedications;
 
                                     // Очищаємо назву аналога та його латинські/кириличні синоніми всередині речення
-                                    $analogFirstWord = explode(' ', trim($rec['name']))[0]; 
-                                    $cleanText = str_ireplace($analogFirstWord, $medicine['name'], $reason['text']); 
+                                    $analogFirstWord = preg_split('/[\s\-]+/u', trim($rec['name']))[0];
+                                    $cleanText = str_ireplace($analogFirstWord, $medicine['name'], $reason['text']);
                                     
-                                    $synonymsMap = [ 
-                                        'cardiomagnyl' => 'Кардіомагніл', 'кардіомагніл' => 'Cardiomagnyl', 
+                                    $synonymsMap = [
+                                        'cardiomagnyl' => 'Кардіомагніл', 'кардіомагніл' => 'Cardiomagnyl',
                                         'enap' => 'Енап', 'енап' => 'Enap', 'nimesil' => 'Німесил', 'німесил' => 'Nimesil'
-                                    ]; 
-                                    $analogFirstWordLower = mb_strtolower($analogFirstWord); 
-                                    if (isset($synonymsMap[$analogFirstWordLower])) { 
-                                        $cleanText = str_ireplace($synonymsMap[$analogFirstWordLower], $medicine['name'], $cleanText); 
-                                    } 
+                                    ];
+                                    $analogFirstWordLower = mb_strtolower($analogFirstWord);
+                                    if (isset($synonymsMap[$analogFirstWordLower])) {
+                                        $cleanText = str_ireplace($synonymsMap[$analogFirstWordLower], $medicine['name'], $cleanText);
+                                    }
+                                    
+                                    // 1. Прибирає конструкції типу "Клопідогрель (клопідогрель)" або "Клопідогрель (Клопідогрель)" -> "Клопідогрель"
+                                    $cleanText = preg_replace('/(\b\p{L}+)\s*\(\s*\1\s*\)/iu', '$1', $cleanText);
+                                    // 2. Про всяк випадок прибирає дублі через кому чи дефіс типу "Клопідогрель, клопідогрель" -> "Клопідогрель"
+                                    $cleanText = preg_replace('/(\b\p{L}+)[\s,\-]+\1\b/iu', '$1', $cleanText);
                                     
                                     $medicine['interaction_details'][] = $cleanText; 
                                 } 
@@ -227,7 +232,42 @@ class AnalyzeForm extends Component
                         }
                     } 
                     $medicine['interaction_matches'] = array_values(array_unique($medicine['interaction_matches'])); 
-                    $medicine['interaction_details'] = array_values(array_unique($medicine['interaction_details'])); 
+                    
+                    // =========================================================================
+                    // СЕМАНТИЧНИЙ ФІЛЬТР ДУБЛІКАТІВ ЗА ПЕРЕТИНОМ СЛІВ
+                    // =========================================================================
+                    $cleanDetails = array_values(array_unique($medicine['interaction_details']));
+                    $filteredDetails = [];
+
+                    foreach ($cleanDetails as $detail) {
+                        $isDuplicate = false;
+                        
+                        // Розбиваємо поточне речення на значущі слова та беремо їхні основи (перші 5 літер)
+                        $words = preg_split('/\s+/u', mb_strtolower($detail));
+                        $stems = array_map(fn($w) => mb_substr(preg_replace('/[^\p{L}\p{N}]/u', '', $w), 0, 5), $words);
+                        $significantStems = array_values(array_filter($stems, fn($s) => mb_strlen($s) >= 4));
+
+                        foreach ($filteredDetails as $addedDetail) {
+                            $addedWords = preg_split('/\s+/u', mb_strtolower($addedDetail));
+                            $addedStems = array_map(fn($w) => mb_substr(preg_replace('/[^\p{L}\p{N}]/u', '', $w), 0, 5), $addedWords);
+                            $addedSignificantStems = array_values(array_filter($addedStems, fn($s) => mb_strlen($s) >= 4));
+
+                            // Тепер порівнюємо основи слів (аспір == аспір, клопі == клопі)
+                            $intersect = array_intersect($significantStems, $addedSignificantStems);
+                            $maxWordCount = max(count($significantStems), count($addedSignificantStems));
+
+                            if ($maxWordCount > 0 && (count($intersect) / $maxWordCount) > 0.45) {
+                                $isDuplicate = true;
+                                break;
+                            }
+                        }
+
+                        if (!$isDuplicate) {
+                            $filteredDetails[] = $detail;
+                        }
+                    }
+
+                    $medicine['interaction_details'] = $filteredDetails;
                 }
                 // =========================================================================
 

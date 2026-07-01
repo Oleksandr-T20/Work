@@ -15,37 +15,30 @@ new class extends Component {
     }
 }; ?>
 
-<nav x-data="{ open: false }" class="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-    <!-- Primary Navigation Menu -->
+<nav x-data="{ open: false }" class="bg-slate-900/50 border-b border-slate-800/60 backdrop-blur-md shadow-sm relative z-30">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16">
             <div class="flex">
-                <!-- Logo -->
                 <div class="shrink-0 flex items-center">
-                    <a href="{{ route('medicine.analyze') }}" wire:navigate>
-                        <x-application-logo class="block h-9 w-auto fill-current text-gray-800 dark:text-gray-200"/>
+                    <a href="{{ route('medicine.analyze') }}" wire:navigate class="flex items-center gap-3 group">
+                        <x-application-logo class="block h-9 w-auto transition-transform duration-300 group-hover:scale-105"/>
+                        <span class="font-sans font-extrabold tracking-wider bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent text-xl select-none">
+                            PharmAI
+                        </span>
                     </a>
-                </div>
-
-                <!-- Navigation Links -->
-                <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
-                    <x-nav-link :href="route('medicine.analyze')" :active="request()->routeIs('medicine.analyze')"
-                                wire:navigate>
-                        PharmAI
-                    </x-nav-link>
                 </div>
             </div>
 
-            <!-- Settings Dropdown -->
             <div class="hidden sm:flex sm:items-center sm:ms-6">
-                <x-dropdown align="right" width="48">
+                {{-- 🟢 ДОДАНО contentClasses: обнуляємо стандартну обводку та тіні Breeze --}}
+                <x-dropdown align="right" width="48" contentClasses="py-0 bg-transparent ring-0 shadow-none">
                     <x-slot name="trigger">
                         <button
-                            class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 focus:outline-none transition ease-in-out duration-150">
+                            class="inline-flex items-center px-3 py-2 border border-slate-800/60 text-sm leading-4 font-medium rounded-xl text-slate-400 bg-slate-950/40 hover:text-slate-200 hover:border-slate-700/80 focus:outline-none transition ease-in-out duration-150 backdrop-blur-sm">
                             <div x-data="{{ json_encode(['name' => auth()->user()->name]) }}" x-text="name"
                                  x-on:profile-updated.window="name = $event.detail.name"></div>
 
-                            <div class="ms-1">
+                            <div class="ms-1.5 text-slate-500">
                                 <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg"
                                      viewBox="0 0 20 20">
                                     <path fill-rule="evenodd"
@@ -57,24 +50,25 @@ new class extends Component {
                     </x-slot>
 
                     <x-slot name="content">
-                        <x-dropdown-link :href="route('profile')" wire:navigate>
-                            {{ __('Profile') }}
-                        </x-dropdown-link>
-
-                        <!-- Authentication -->
-                        <button wire:click="logout" class="w-full text-start">
-                            <x-dropdown-link>
-                                {{ __('Log Out') }}
+                        {{-- 🟢 ФІКС: повністю видалено "border border-slate-800" --}}
+                        <div class="bg-slate-900 rounded-xl overflow-hidden shadow-2xl">
+                            <x-dropdown-link :href="route('profile')" wire:navigate class="hover:bg-slate-800/50 text-slate-300">
+                                {{ __('Профіль') }}
                             </x-dropdown-link>
-                        </button>
+
+                            <button wire:click="logout" class="w-full text-start">
+                                <x-dropdown-link class="hover:bg-red-950/30 text-red-400 hover:text-red-300">
+                                    {{ __('Вийти') }}
+                                </x-dropdown-link>
+                            </button>
+                        </div>
                     </x-slot>
                 </x-dropdown>
             </div>
 
-            <!-- Hamburger -->
             <div class="-me-2 flex items-center sm:hidden">
                 <button @click="open = ! open"
-                        class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-500 dark:focus:text-gray-400 transition duration-150 ease-in-out">
+                        class="inline-flex items-center justify-center p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 focus:outline-none transition duration-150 ease-in-out">
                     <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                         <path :class="{'hidden': open, 'inline-flex': ! open }" class="inline-flex"
                               stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -87,32 +81,29 @@ new class extends Component {
         </div>
     </div>
 
-    <!-- Responsive Navigation Menu -->
-    <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
+    <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden bg-slate-900/90 border-b border-slate-800 backdrop-blur-lg">
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="route('medicine.analyze')" :active="request()->routeIs('medicine.analyze')"
-                                   wire:navigate>
+                                   wire:navigate class="text-slate-300">
                 Аналіз препаратів
             </x-responsive-nav-link>
         </div>
 
-        <!-- Responsive Settings Options -->
-        <div class="pt-4 pb-1 border-t border-gray-200 dark:border-gray-600">
+        <div class="pt-4 pb-1 border-t border-slate-800">
             <div class="px-4">
-                <div class="font-medium text-base text-gray-800 dark:text-gray-200"
+                <div class="font-medium text-base text-slate-200"
                      x-data="{{ json_encode(['name' => auth()->user()->name]) }}" x-text="name"
                      x-on:profile-updated.window="name = $event.detail.name"></div>
-                <div class="font-medium text-sm text-gray-500">{{ auth()->user()->email }}</div>
+                <div class="font-medium text-sm text-slate-400">{{ auth()->user()->email }}</div>
             </div>
 
             <div class="mt-3 space-y-1">
-                <x-responsive-nav-link :href="route('profile')" wire:navigate>
+                <x-responsive-nav-link :href="route('profile')" wire:navigate class="text-slate-400 hover:text-slate-200">
                     {{ __('Profile') }}
                 </x-responsive-nav-link>
 
-                <!-- Authentication -->
                 <button wire:click="logout" class="w-full text-start">
-                    <x-responsive-nav-link>
+                    <x-responsive-nav-link class="text-red-400 hover:text-red-300">
                         {{ __('Log Out') }}
                     </x-responsive-nav-link>
                 </button>

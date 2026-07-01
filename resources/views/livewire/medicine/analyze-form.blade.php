@@ -15,7 +15,7 @@
             <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.4)] backdrop-blur-md">
                 <form wire:submit="submit" class="space-y-5">
 
-                    <x-ui.select label="Режим аналізу" wire:model.live="analysisType"
+                    <x-ui.select label="Режим аналізу" wire:model.live="analysisType" 
                                  :error="$errors->first('analysisType')">
                         <option value="medicine_name">💊 За найменуванням лікарського засобу</option>
                         <option value="symptoms">🤒 За клінічними симптоми</option>
@@ -443,9 +443,29 @@
                 </div>
 
                 @if (!empty($medicine['interaction_details']))
-                    <div class="bg-red-950/20 border border-red-900/40 rounded-xl px-4 py-3 space-y-1 text-sm text-red-300/90 shadow-inner">
-                        @foreach ($medicine['interaction_details'] as $detail)
-                            <p class="flex items-start gap-2">
+                    @php
+                        // 1. Прибираємо повні дублікати
+                        $uniqueDetails = array_unique($medicine['interaction_details']);
+                        
+                        // 2. Розумна фільтрація занадто схожих речень (за Левенштейном)
+                        $finalDetails = [];
+                        foreach ($uniqueDetails as $detail) {
+                            $isDuplicate = false;
+                            foreach ($finalDetails as $added) {
+                                if (levenshtein(mb_strtolower($detail), mb_strtolower($added)) < 50) {
+                                    $isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            if (!$isDuplicate) {
+                                $finalDetails[] = $detail;
+                            }
+                        }
+                    @endphp
+
+                    <div class="bg-red-950/20 border border-red-900/40 rounded-xl px-4 py-3 space-y-2 text-sm text-red-300/90 shadow-inner">
+                        @foreach ($finalDetails as $detail)
+                            <p class="flex items-start gap-2 leading-relaxed">
                                 <span class="shrink-0 mt-0.5">❌</span>
                                 <span>{{ $detail }}</span>
                             </p>
