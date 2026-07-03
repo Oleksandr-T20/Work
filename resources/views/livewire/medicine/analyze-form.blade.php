@@ -255,7 +255,7 @@
                                 </p>
                             </div>
                             <div class="bg-slate-800/30 border border-slate-800/80 p-3 rounded-xl text-center shadow-inner flex flex-col justify-center min-w-0">
-                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Низький збіг</p>
+                                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-tight">Низька відповідність</p>
                                 <p class="text-2xl font-black text-slate-400 mt-1">
                                     {{ collect($recommendations)->where('smart_score', '<', 50)->count() }} <span class="text-xs font-normal text-slate-500">ЛЗ</span>
                                 </p>
@@ -294,7 +294,7 @@
                                 </div>
                                 <div class="flex items-center gap-2 text-slate-300">
                                     <span class="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span>
-                                    <span><strong>0%–49%:</strong> Низький збіг складників</span>
+                                    <span><strong>0%–49%:</strong> Низька відповідність</span>
                                 </div>
                             </div>
                         </div>
@@ -331,30 +331,30 @@
                             @endif
                         </div>
 
-                        {{-- 📊 4. ГРАФІКИ РЕЙТИНГІВ --}}
+                        {{-- 📊 4. СТАНДАРТНІ ГРАФІКИ РЕЙТИНГІВ (ОПТИМІЗОВАНИЙ МАТОВИЙ СИНХРОН) --}}
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2 border-t border-slate-800/40">
-                            
-                            {{-- Залишаємо розтягнутим на всю ширину дашборду для симетрії --}}
+    
+                            {{-- Розтягуємо на всю ширину дашборду для чистої та красивої симетрії --}}
                             <div class="md:col-span-2 w-full">
-                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-sans">🧠 Інтелектуальний рейтинг відповідності</p>
-                                
-                                {{-- Обгортку bg-slate-800/20 вирівняно під стиль сусідніх карток графіків --}}
-                                <div class="bg-slate-800/20 border border-slate-800/60 rounded-xl p-4 space-y-3.5 max-h-[340px] overflow-y-auto shadow-inner">
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 font-sans">🧠 Інтелектуальний рейтинг відповідності</p>
+        
+                                <div class="space-y-4 w-full">
                                     @foreach ($recommendations as $rec)
                                         <div class="space-y-1.5">
-                                            {{-- 🟢 ФІКС ШРИФТУ: Зменшено до витонченого text-[11px], прибрано зайву жирність (font-medium) --}}
+                                            {{-- Рядок показників: компактний шрифт text-[11px] та акуратне напівжирне виділення --}}
                                             <div class="flex justify-between items-center text-[11px] font-sans">
                                                 <span class="font-medium text-slate-300 truncate pr-4">{{ $rec['name'] }}</span>
-                                                <span class="font-semibold" style="color: {{ $rec['smart_score'] >= 75 ? '#4ade80' : ($rec['smart_score'] >= 50 ? '#facc15' : '#f87171') }}">
+                                                <span class="font-semibold" style="color: {{ $rec['smart_score'] >= 75 ? 'rgba(34,197,94,0.9)' : ($rec['smart_score'] >= 50 ? 'rgba(234,179,8,0.9)' : 'rgba(239,68,68,0.9)') }}">
                                                     {{ $rec['smart_score'] }}%
                                                 </span>
                                             </div>
-                                            
-                                            {{-- Тонка лінія h-2 повертає віджету строгий лабораторний стиль --}}
-                                            <div class="w-full bg-slate-900/60 rounded-full h-2 border border-slate-800/40 overflow-hidden">
-                                                {{-- 🟢 ФІКС ВІДТІНКУ: Пряма трансляція матових RGBA-колірних чистих тонів із конфігурації Chart.js --}}
+                    
+                                            {{-- Тонка лінія прогресу h-2 на чистому темному фоні без зайвих рамок --}}
+                                            <div class="w-full bg-slate-900/50 rounded-full h-2 border border-slate-800/30 overflow-hidden">
+                                                {{-- Матові оригінальні RGBA-кольори з конфігурації графіків --}}
                                                 <div class="h-full rounded-full transition-all duration-500"
-                                                     style="width: {{ $rec['smart_score'] }}%; background-color: {{ $rec['smart_score'] >= 75 ? 'rgba(34,197,94,0.8)' : ($rec['smart_score'] >= 50 ? 'rgba(234,179,8,0.8)' : 'rgba(239,68,68,0.8)') }};"></div>
+                                                    style="width: {{ $rec['smart_score'] }}%; background-color: {{ $rec['smart_score'] >= 75 ? 'rgba(34,197,94,0.8)' : ($rec['smart_score'] >= 50 ? 'rgba(234,179,8,0.8)' : 'rgba(239,68,68,0.8)') }};">
+                                                </div>
                                             </div>
                                         </div>
                                     @endforeach
@@ -362,7 +362,7 @@
                             </div>
 
                             @if ($analysisType === 'medicine_name')
-                                {{-- Логічний заглушечний слот для компонентного аналізу ліків --}}
+                                {{-- Системний if-заглушка для альтернативних режимів скринінгу ліків --}}
                             @endif
                         </div>
 
@@ -856,7 +856,7 @@ document.addEventListener('alpine:init', () => {
                 this.charts['safety-donut'] = new Chart(ctxDonut, {
                     type: 'doughnut',
                     data: {
-                        labels: ['Висока відповідність', 'Часткова відповідність', 'Низький збіг складників'],
+                        labels: ['Висока відповідність', 'Часткова відповідність', 'Низька відповідність'],
                         datasets: [{
                             data: [safeCount, warningCount, riskCount],
                             backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(234,179,8,0.8)', 'rgba(100,116,139,0.8)'],
